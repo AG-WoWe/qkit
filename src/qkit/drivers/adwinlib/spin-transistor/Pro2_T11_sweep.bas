@@ -10,7 +10,7 @@
 ' Optimize                       = Yes
 ' Optimize_Level                 = 1
 ' Stacksize                      = 1000
-' Info_Last_Save                 = DESKTOP-0M2IFQQ  DESKTOP-0M2IFQQ\kaptn
+' Info_Last_Save                 = DESKTOP-H3MR9LF  DESKTOP-H3MR9LF\joshu
 '<Header End>
 'Sweeps for spin transistor measurements written by Luca Kosche in April 2024
 'This script is written sweep up to all outputs in the most efficient way on T11 and 16-bit output card.
@@ -29,14 +29,14 @@
 #define output_card         3
 #define nb_outs             8         'number of outputs
 
-#define out1              Par_1
-#define out2              Par_2
-#define out3              Par_3
-#define out4              Par_4
-#define out5              Par_5
-#define out6              Par_6
-#define out7              Par_7
-#define out8              Par_8
+#define out1              Par_2
+#define out2              Par_3
+#define out3              Par_4
+#define out4              Par_5
+#define out5              Par_6
+#define out6              Par_7
+#define out7              Par_8
+#define out8              Par_9
 #define sweep_active      Par_20
 #define lockin_active     Par_21
 #define measure_active    Par_22
@@ -93,7 +93,7 @@ event:
       Inc cycle
     endif
     
-    ' CALCULATE NEW OUTPUTS AND WRITE TO PAR_1 - Par_8
+    ' CALCULATE NEW OUTPUTS AND WRITE TO PAR_2 - Par_9
     out1 = start1 + inc1 * cycle
     out2 = start2 + inc2 * cycle
     out3 = start3 + inc3 * cycle

@@ -9,7 +9,7 @@
 ' Optimize                       = Yes
 ' Optimize_Level                 = 1
 ' Stacksize                      = 1000
-' Info_Last_Save                 = DESKTOP-0M2IFQQ  DESKTOP-0M2IFQQ\kaptn
+' Info_Last_Save                 = DESKTOP-H3MR9LF  DESKTOP-H3MR9LF\joshu
 '<Header End>
 ' ADwin lockin driver written by Luca Kosche in April 2024
 ' Idea:
@@ -57,7 +57,8 @@
 #define lockin_len        8003      '8003 gives a minimum lockin frequency of 62.48Hz @ 2us cycle time.
 
 'communication PC ADwin
-#define lockin_bias         Par_8     'lock-in bias voltage (bits)
+#define version             Par_1     'programm version
+#define lockin_bias         Par_9     'lock-in bias voltage (bits)
 #define lockin_active       Par_21    'lockin active flag
 #define measure_active      Par_22
 #define amplitude           Par_24    'lock-in amplitude (bits)
