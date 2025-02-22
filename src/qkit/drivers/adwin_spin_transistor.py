@@ -48,8 +48,9 @@
     '''
 
 __all__ = ['adwin_spin_transistor', 'AdwinIO']
-__version__ = '0.1_20240514'
+__version__ = '42.0.1'
 __author__ = 'Luca Kosche'
+__version_em__ = '21.0.1'
 
 import logging as log
 from pathlib import Path
@@ -61,14 +62,16 @@ from qkit.drivers.adwinlib.io_handler import AdwinIO, AdwinModeError
 from qkit.drivers.adwinlib.io_handler import AdwinLimitError
 from qkit.drivers.adwinlib.io_handler import AdwinArgumentError
 from qkit.drivers.adwinlib.io_handler import AdwinNotImplementedError
+from qkit.drivers.adwinlib.io_handler import get_integer_from_version_string, get_version_string_from_integer
 
 # These constants have to be synchronised with the definitions of Par_no
 # FPar_no and Data_no and constants in the ADbasic files.
-
+VERSION_PAR = 1                 # program version for boot
 # BOTH PROCESSES
 LOCKIN_ACTIVE_PAR = 21      # Reports "1" if lockin process is active
+DAC_ZERO = 32768
 # LOCKIN PROCESS
-LOCKIN_BIAS_PAR = 8         # Lockin bias voltage (bits)
+LOCKIN_BIAS_PAR = 9         # Lockin bias voltage (bits)
 MEASURE_ACTIVE_PAR = 22     # activate data aquisition with "1"
 LOCKIN_OR_DC_PAR = 23   	# Measure lockin or raw dc input
 AMPLITUDE_PAR = 24          # Lockin amplitude (bits)
@@ -93,6 +96,19 @@ TARGET_DATA = 20            # Target values of the next sweep.
 # RESULTING FROM ADBASIC FILES
 MIN_FREQUENCY = 62.48
 MAX_FREQUENCY = 40E3 # too high frequency might suffer from jitter
+
+def get_program(version):
+    """ Returns version string of loaded software and its name."""
+    software = "unknown"
+    version = get_version_string_from_integer(version)
+    major = int(version.split(".")[0])
+    if major == int(__version__.split(".")[0]):
+        software = "qkit_ST"
+    elif major == int(__version_em__.split(".")[0]):
+        software = "qkit_EM"                
+    elif major < int(__version_em__.split(".")[0]):
+        software = "nanoqt"
+    return version, software
 
 
 class adwin_spin_transistor(Instrument):
@@ -129,6 +145,15 @@ class adwin_spin_transistor(Instrument):
                                 raiseExceptions=1,
                                 useNumpyArrays=True)
 
+        # try readout loaded program version
+        try:
+            version = self.adw.Get_Par(VERSION_PAR)
+            version, self.software = get_program(version)
+            log.info(f"ADwin: Initialized program: {self.software} ({version})")
+        except adw.ADwinError:
+            self.software = "unknown"
+            log.critical(f"ADwin: Initialized program: {self.software}")
+
         # Set 'bootload' to 'False' to not reboot the Adwin.
         if bootload:
             # before boot try to read the current outputs, which can
@@ -143,20 +168,29 @@ class adwin_spin_transistor(Instrument):
             btl_name = f"ADwin{processor.replace('T', '')}.btl"
             btl_path = Path(self.adw.ADwindir) / btl_name
             self.adw.Boot(str(btl_path))
-            # set output buffer if possible, otherwise set all outputs
-            # to zero volts
-            if self._state == 'output_buffer_loaded':
-                self.set_output_buffer(output_buffer, val_format='bit')
-            else:
-                outs_zero = [2**15] * NB_OUTS
-                self.set_output_buffer(outs_zero, val_format='bit')
-                msg = ('Adwin: setting output buffer to zero! Recover '
-                        + 'the current working Point by manually setting'
-                        + ' the output buffer using set_output_buffer() '
-                        + 'BEFORE THE FIRST SWEEP')
-                log.critical(msg)
+
+            # try to set loaded output buffer
+            try:
+                if self._state == 'output_buffer_loaded':
+                    self.set_output_buffer(output_buffer,'bit')
+                    log.info('ADwin: loaded output buffer set! Booting.')
+                elif self._state == 'output_buffer_unknown':
+                    outs_zero = [DAC_ZERO] * NB_OUTS
+                    self.set_output_buffer(outs_zero, val_format='bit')
+                    msg = ('Adwin: setting output buffer to zero! Recover '
+                            + 'the current working Point by manually setting'
+                            + ' the output buffer using set_output_buffer() '
+                            + 'BEFORE THE FIRST SWEEP')
+                    log.critical(msg)
+            except adw.ADwinError:
+                log.error(f"ADwin: Failed setting output buffer!")
 
             self._state = 'booted'
+            self.software = "qkit_ST"
+            version = __version__
+
+            # set new program version on ADwin
+            self.adw.Set_Par(VERSION_PAR, get_integer_from_version_string(version))
 
             # load processes
             log.info('Adwin loading: %s', self._lockin_process.name)
@@ -165,7 +199,10 @@ class adwin_spin_transistor(Instrument):
             self.adw.Load_Process(str(self._sweep_process))
 
             self._state = 'processes_loaded'
-
+        else:
+            if version != __version__:
+                log.info(f"loaded program version: {self.software} ({version}) -> new program version: qkit_ST ({__version__})")
+                log.error("ADwin: program version is not up to date, bootload needed!")
         # implement general functions
         self.add_function("sweep")
         self.add_function("sweep_measure")
@@ -333,28 +370,40 @@ class adwin_spin_transistor(Instrument):
         # Read all adwin parameters holding the current output values
         match channel:
             case int():
-                val = self.adw.Get_Par(channel)
-                if out_format == 'qty':
-                    return self.aio.bit2qty(val, channel, absolute=True)
-                elif out_format == 'bit':
-                    return val
+                if (self.software == "qkit_ST") or (self.software == "qkit_EM"):
+                    val = self.adw.Get_Par(channel)
+                elif self.software == "nanoqt":
+                    num = self.adw.Fifo_Full(3)
+                    val = self.adw.GetData_Long(3,1,num+1)[channel-1]
                 else:
                     raise AdwinArgumentError
+                if out_format == 'qty':
+                    if self.software != "qkit_ST":
+                        log.critical("ADwin configuration not known, return value as bit instead!")
+                    else:
+                        return self.aio.bit2qty(val, channel, True)
+                return val
             case str():
                 raise AdwinNotImplementedError
             case None:
-                if out_format == 'qty':
+                if (self.software == "qkit_ST") or (self.software == "qkit_EM"):
                     outs = np.empty(NB_OUTS)
                     outs.fill(np.NaN)
-                    for i, _ in enumerate(outs):
-                        val =  self.adw.Get_Par(i+1)
-                        outs[i] = self.aio.bit2qty(val, i+1, True)
-                elif out_format == 'bit':
-                    outs = []
-                    for i in range(NB_OUTS):
-                        outs.append(self.adw.Get_Par(i+1))
-                else:
-                    raise AdwinArgumentError
+                    if self.software == "qkit_ST":
+                        for i, _ in enumerate(outs):
+                            outs[i] =  self.adw.Get_Par(i+2)
+                    else:
+                        outs[7] = self.adw.Get_Par(LOCKIN_BIAS_PAR)
+                elif self.software == "nanoqt":
+                    num = self.adw.Fifo_Full(3)
+                    outs = self.adw.GetData_Long(3,1,num+1)
+                if out_format == 'qty':
+                    if self.software != "qkit_ST":
+                        log.critical("ADwin configuration not known, return outputs as bits instead!")
+                    else:
+                        for i, _ in enumerate(outs):
+                            outs[i] = self.aio.bit2qty(outs[i], i+1, True)
+                        return outs
                 return outs
             case _:
                 raise AdwinArgumentError
@@ -374,7 +423,7 @@ class adwin_spin_transistor(Instrument):
         if len(outs) != NB_OUTS:
             raise AdwinArgumentError
         for idx, val in enumerate(outs):
-            self.adw.Set_Par(idx+1, int(val))
+            self.adw.Set_Par(idx+2, int(val))
 
     def _start_sweep(self, target, duration, delay=0.05):
         # set sweep parameters

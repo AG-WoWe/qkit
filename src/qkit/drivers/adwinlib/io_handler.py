@@ -55,6 +55,27 @@ import numpy as np
 __version__ = '1.0_20240425'
 __author__ = 'Luca Kosche'
 
+def get_integer_from_version_string(version_string):
+    """ Convert the version string to an integer,
+        to save the loaded version on the ADwin"""
+    # break down the version string into major, minor and patch level
+    major, minor, patch = map(int, version_string.split('.'))
+    # calculate the integer by adding the parts together
+    version_number = (major << 16) | (minor << 8) | patch
+    return version_number
+
+def get_version_string_from_integer(number):
+    """ Convert the loaded program version from an integer,
+        saved on the ADwin to version string"""
+    # convert the integer to a 24-bit binary representation
+    binary_representation = f"{number:024b}"
+    # split the bits into major, minor and patch level (8 bits each)
+    major = int(binary_representation[:8], 2)  # highest byte
+    minor = int(binary_representation[8:16], 2)  # middle byte
+    patch = int(binary_representation[16:], 2)  # lowest byte
+    # create the version string
+    return f"{major}.{minor}.{patch}"
+
 def bit2volt(val: int|float|ndarray|list, bits, vrange, absolute):
     """ Calculate voltage from bit value for card with voltage range -10V
         to 10V with 16-bits (default). 
