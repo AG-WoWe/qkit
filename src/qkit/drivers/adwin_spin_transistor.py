@@ -47,53 +47,71 @@
             * Maybe programm the LP filter for dc measurements as well
     '''
 
-__all__ = ['adwin_spin_transistor', 'AdwinIO']
+__all__ = ['adwin_spin_transistor']
 __version__ = '0.1_20240514'
 __author__ = 'Luca Kosche'
 
 import logging as log
 from pathlib import Path
 from time import sleep
-import numpy as np
 import ADwin as adw
 from qkit.core.instrument_base import Instrument
 from qkit.drivers.adwinlib.io_handler import AdwinIO, AdwinModeError
 from qkit.drivers.adwinlib.io_handler import AdwinLimitError
 from qkit.drivers.adwinlib.io_handler import AdwinArgumentError
-from qkit.drivers.adwinlib.io_handler import AdwinNotImplementedError
+from qkit.drivers.adwinlib.fw_decoder import decode_adbasic_firmware
+from qkit.drivers.adwinlib.nanoqt_tools import read_nanoqt_outputs
 
-# These constants have to be synchronised with the definitions of Par_no
-# FPar_no and Data_no and constants in the ADbasic files.
+# These constants have to be synchronised with the definitions in the
+# ADbasic firmware! For parameters where time is involved (frequency,
+# sample_rate, sweep_duration) the exact values used by the firmware
+# are sometimes not the set values due to the time quantization of the
+# hardware. Therefore the real values can be read out after starting
+# the process
 
-# BOTH PROCESSES
-LOCKIN_ACTIVE_PAR = 21      # Reports "1" if lockin process is active
-# LOCKIN PROCESS
-LOCKIN_BIAS_PAR = 8         # Lockin bias voltage (bits)
-MEASURE_ACTIVE_PAR = 22     # activate data aquisition with "1"
-LOCKIN_OR_DC_PAR = 23   	# Measure lockin or raw dc input
-AMPLITUDE_PAR = 24          # Lockin amplitude (bits)
-TAO_FPAR = 23               # Time constant of lockin filter
-FREQUENCY_FPAR = 22         # Target lockin frequency
-REPORT_FREQUENCY_FPAR = 24  # Real lockin frequency due to lockin_array
-SAMPLERATE_FPAR = 25        # Target sample rate
-REPORT_SAMPLERATE_FPAR = 26 # Real samplerate due to 2us time resolution
-FIFO_LEN = 1000003          # Length of Fifo for data transmittion
-INS = {'inph': 1, 'quad': 2, 'raw': 3} #fifo numbers
-LOCKIN_CARD = 3             # Hard coded DAC card for lockin output
-LOCKIN_CHANNEL = 8          # Hard coded DAC channel for lockin output
-LOCKIN_LEN = 8003           # Length of lockin output/reference arrays
-# SWEEP PROCESS
-SWEEP_ACTIVE_PAR = 20       # Active sweep by setting to "2" and check
-                            # rate by looking for "1".
-NB_OUTS = 8                 # number of Adwin outputs
-DURATION_FPAR = 20          # Target duration of sweep
-REPORT_DURATION_FPAR = 21   # Duration of sweep due to 50kHz resolution
-TARGET_DATA = 20            # Target values of the next sweep.
+# HARD CODED IN SWEEP AND LOCKIN PROCESS
+LOCKIN_ACTIVE = 3      # Reports: "1" if lockin process is active
+MEASURE_ACTIVE = 4     # Command: lockin process to write data to FIFOS
+LOCKIN_BIAS = 38       # Command: lockin process to add bias to lockin
+
+# HARD CODED IN LOCKIN PROCESS
+VERSION_PROCESS_1 = 1  # Read: (Par)  Version of lockin process
+AMPLITUDE = 5          # Set:  (Par)  Lockin amplitude (bits)
+FREQUENCY = 5          # Set:  (FPar) Lockin frequency (Hz)
+REPORT_FREQUENCY = 6   # Read: (FPar) Lockin frequency (Hz)
+LOCKIN_PHASE = 7       # Set:  (FPar) Lockin reference phase shift (rad)
+SAMPLE_RATE = 8        # Set:  (FPar) Sample rate after subsampling (Hz)
+REPORT_SAMPLE_RATE = 9 # Read: (FPar) Current samplerate (Hz)
+TAO_LOWPASS = 10       # Set:  (FPAR) Tc of lockin lowpass filter
+MAF = 6                # Set:  (Par)  Moving average filter length in
+                       # lockin periods -> F_0poles = FREQUENCY / MAF
+FIFO_LEN = 1000003     # Hard coded: Length of data transmittion FIFOS
+INS = { 'inph': 1,     # Data_1: (float) Inphase data FIFO
+        'quad': 2,     # Data_2: (float) Quadrature data FIFO
+        'raw': 3}      # Data_3: (float) Raw input signal data FIFO
+LOCKIN_CARD = 3        # Hard coded: DAC card for lockin output
+LOCKIN_CHANNEL = 8     # Hard coded: DAC channel for lockin output
+LOCKIN_LEN = 8003      # Hard coded: Length of lockin signal arrays
+
+#HARD CODED IN SWEEP PROCESS
+VERSION_PROCESS_2 = 2  # Read: (Par)  Version of sweep process
+SWEEP_ACTIVE = 11      # Command, Read: (Par) Start/Check Sweep (=1)
+NB_OUTS = 8            # Hard coded: amount of ADwin outputs
+SWEEP_DURATION = 11    # Set:  (FPar) Duration of the sweep (s)
+REPORT_DURATION = 12   # Read: (FPAr) Duration of the sweep (s)
+SWEEP_TARGET = 11      # Set: (Data (Long)) Target output of sweep (bit)
 
 # RESULTING FROM ADBASIC FILES
+OUT1_PAR= LOCKIN_CARD * 10 + 1 #The first output for card 3 is Par_31
 MIN_FREQUENCY = 62.48
 MAX_FREQUENCY = 40E3 # too high frequency might suffer from jitter
 
+LOCKIN_PROCESS_NO = 1
+SWEEP_PROCESS_NO = 2
+
+class AdwinFirmwareError(Exception):
+    """ Error raised, when Firmware running on Adwin is not compatible
+        with python adwin driver"""
 
 class adwin_spin_transistor(Instrument):
     ''' ADwin driver to handle kHz lockin + readout while performing
@@ -102,69 +120,41 @@ class adwin_spin_transistor(Instrument):
     def __init__(self,
         name='my_instrument',
         processor='T11',
-        mode='lockin', #lockin or dc
+        lockin_filter='maf_1stageLP', # maf_1stageLP or 4stageLP
         devicenumber=1,
         bootload=True,
         hard_config=None,
         soft_config=None):
 
-        log.info('Initializing instrument in "%s" mode.', mode)
-        Instrument.__init__(self, name, tags=['physical','ADwin_ProII'])
-
-        self._state = 'init'
-        self._params = {'sample_rate': None,
-                        'inputs': []}
-        module_dir = Path(__file__).parent
-        adbasic_dir = module_dir / 'adwinlib' / 'spin-transistor'
-        self._lockin_process = adbasic_dir / 'Pro2_T11_lockin.TB1'
-        self._lockin_process_no = 1
-        self._sweep_process = adbasic_dir / 'Pro2_T11_sweep.TB2'
-        self._sweep_process_no = 2
-
         # create AdwinIO Instance
         self.aio = AdwinIO(hard_config, soft_config)
 
         # create ADwin instance
-        self.adw = adw.ADwin(DeviceNo=devicenumber,
-                                raiseExceptions=1,
-                                useNumpyArrays=True)
+        self.adw = adw.ADwin(DeviceNo=devicenumber, raiseExceptions=1,
+                             useNumpyArrays=True)
+
+        # list of parameters, that needs to be set for lockin
+        self._lockin_param_list = ['frequency', 'amplitude', 'tao',
+                                   'phase', 'maf']
+
+        log.info('Initializing adwin_spin_transistor instrument')
+        Instrument.__init__(self, name, tags=['physical','ADwin_ProII'])
+
+        self._state = 'init'
+        self._sample_rate = None
+        self._inputs = []
 
         # Set 'bootload' to 'False' to not reboot the Adwin.
         if bootload:
-            # before boot try to read the current outputs, which can
-            # fail if the adwin was power cycled and never booted since
-            try:
-                output_buffer = self.read_outputs(out_format='bit')
-                self._state = 'output_buffer_loaded'
-            except adw.ADwinError:
-                self._state = 'output_buffer_unknown'
-                log.critical('ADwin: outputs unknown! Booting.')
-            #boot adwin
-            btl_name = f"ADwin{processor.replace('T', '')}.btl"
-            btl_path = Path(self.adw.ADwindir) / btl_name
-            self.adw.Boot(str(btl_path))
-            # set output buffer if possible, otherwise set all outputs
-            # to zero volts
-            if self._state == 'output_buffer_loaded':
-                self.set_output_buffer(output_buffer, val_format='bit')
-            else:
-                outs_zero = [2**15] * NB_OUTS
-                self.set_output_buffer(outs_zero, val_format='bit')
-                msg = ('Adwin: setting output buffer to zero! Recover '
-                        + 'the current working Point by manually setting'
-                        + ' the output buffer using set_output_buffer() '
-                        + 'BEFORE THE FIRST SWEEP')
+            self._bootload(processor, lockin_filter)
+        else:
+            firmware, version = self._read_adwin_firmware()
+            if firmware != 'SPIN-TRANSISTOR':
+                msg = (f'ADwin is running firmware {firmware}, version '
+                     + f' {version}, which is not compatible with this '
+                     + ' driver. Consider booting using bootload=True.')
                 log.critical(msg)
-
-            self._state = 'booted'
-
-            # load processes
-            log.info('Adwin loading: %s', self._lockin_process.name)
-            self.adw.Load_Process(str(self._lockin_process))
-            log.info('Adwin loading: %s', self._sweep_process.name)
-            self.adw.Load_Process(str(self._sweep_process))
-
-            self._state = 'processes_loaded'
+                raise AdwinFirmwareError
 
         # implement general functions
         self.add_function("sweep")
@@ -175,6 +165,7 @@ class adwin_spin_transistor(Instrument):
         self.add_function("read_outputs")
         self.add_function("stop_sweep")
         self.add_function("set_output_buffer")
+        self.add_function("list_connected_outputs")
 
 ########################################################################
 ####################### MEASUREMENT ROUTINES ###########################
@@ -184,7 +175,7 @@ class adwin_spin_transistor(Instrument):
         """ Ramp the outputs of the ADwin wihtout measurement.
             If wait==True it waits for the sweep to be finished. """
         self._start_sweep(target, duration)
-        while wait is True and self.adw.Get_Par(SWEEP_ACTIVE_PAR) == 1:
+        while wait is True and self.adw.Get_Par(SWEEP_ACTIVE) == 1:
             pass
         for i in INS.values():
             self.adw.Fifo_Clear(i)
@@ -207,7 +198,7 @@ class adwin_spin_transistor(Instrument):
         # timing, but limits communication during measurement)
         sleep(duration)
         # check if sweep has ended
-        while self.adw.Get_Par(SWEEP_ACTIVE_PAR) == 1:
+        while self.adw.Get_Par(SWEEP_ACTIVE) == 1:
             pass
         # fetch measurement data from adwin and return
         return self._fetch_data_from_fifos()
@@ -221,10 +212,29 @@ class adwin_spin_transistor(Instrument):
         self._check_measurement_active()
         self._warn_if_fifo_to_small(duration)
         # enable data aquisition
-        self.adw.Set_Par(MEASURE_ACTIVE_PAR, 1)
+        self.adw.Set_Par(MEASURE_ACTIVE, 1)
         sleep(duration)
         # disable data aquisition
-        self.adw.Set_Par(MEASURE_ACTIVE_PAR, 0)
+        self.adw.Set_Par(MEASURE_ACTIVE, 0)
+        # fetch measurement data from adwin and return
+        return self._fetch_data_from_fifos()
+
+    def measure_comm_test(self, duration, comm_delay):
+        ''' Start a measurement for time duration, but start
+            communication to adwin after comm_delay until measurement is
+            finished '''
+        # sanity checks
+        self._check_measurement_active()
+        self._warn_if_fifo_to_small(duration)
+        samples = duration * self._sample_rate
+        # enable data aquisition
+        self.adw.Set_Par(MEASURE_ACTIVE, 1)
+        sleep(comm_delay)
+        fifo_full = 0
+        while fifo_full < samples:
+            fifo_full = self.adw.Fifo_Full(INS['raw'])
+        # disable data aquisition
+        self.adw.Set_Par(MEASURE_ACTIVE, 0)
         # fetch measurement data from adwin and return
         return self._fetch_data_from_fifos()
 
@@ -232,11 +242,12 @@ class adwin_spin_transistor(Instrument):
         ''' Fetch all data from the fifos which has been set as inputs
             during init_measurement() and clear all other fifos '''
         res = {'inph': None, 'quad': None, 'raw': None}
-        samples = self.adw.Fifo_Full(INS['inph'])
         for key in res:
-            if key in self._params['inputs']:
+            if key in self._inputs:
+                samples = self.adw.Fifo_Full(INS[key])
                 tmp = self.adw.GetFifo_Float(INS[key], samples)
-                res[key] = self.aio.bit2qty(tmp, 'readout', False)
+                res[key] = self.aio.bit2qty(tmp, name='input',
+                                            absolute=False)
             else:
                 self.adw.Fifo_Clear(INS[key])
         return res
@@ -245,149 +256,191 @@ class adwin_spin_transistor(Instrument):
 ########################## PREPARE MEASUREMENT #########################
 ########################################################################
 
-    def init_measurement(self, mode, sample_rate, bias, inputs,
-                         **kwargs):
-        ''' Initialize a lockin or dc measurement (mode). This start 
-            the process needed for data aquisition. In lockin mode it
-            also applies the continous lockin signal. '''
+    def init_measurement(self, sample_rate, bias, inputs,
+                         **lockin_params):
+        ''' Initialize a lockin/dc measurement. For simplicity of the
+            ADbasic driver, the lockin is always applied, but with
+            amplitude 0 effectively there is no lockin signal. '''
         # stop old measurement process if still running
         if self._state == 'measurement_ready':
-            self.adw.Stop_Process(self._lockin_process_no)
+            self.adw.Stop_Process(LOCKIN_PROCESS_NO)
         # set sample rate
-        self.adw.Set_FPar(SAMPLERATE_FPAR, sample_rate)
+        self.adw.Set_FPar(SAMPLE_RATE, sample_rate)
         # set bias voltage
-        bias_bits = self.aio.qty2bit(bias, LOCKIN_CHANNEL)
-        self.adw.Set_Par(LOCKIN_BIAS_PAR, bias_bits)
+        bias_bits = self.aio.qty2bit(bias, card=LOCKIN_CARD,
+                                     channel=LOCKIN_CHANNEL)
+        lockin_par = self._get_output_par(LOCKIN_CARD, LOCKIN_CHANNEL)
+        self.adw.Set_Par(lockin_par, bias_bits)
         # set inputs
         for inp in inputs:
             if inp not in INS:
                 raise AdwinArgumentError
-        self._params['inputs'] = inputs
-        # handle measurement modes
-        match mode:
-            case 'lockin':
-                try:
-                    # get lockin frequency
-                    freq = kwargs['frequency']
-                    # check if frequency is supported
-                    if not MIN_FREQUENCY <= freq <= MAX_FREQUENCY:
-                        raise AdwinLimitError
-                    self.adw.Set_FPar(FREQUENCY_FPAR, freq)
-                    # get lockin amplitude
-                    amp = kwargs['amplitude']
-                    # translate to bit value
-                    amp_bits = self.aio.qty2bit(amp, LOCKIN_CHANNEL,
-                                                absolute=False)
-                    self.adw.Set_Par(AMPLITUDE_PAR, amp_bits)
-                    # get filter constant tao
-                    tao = kwargs['tao']
-                    self.adw.Set_FPar(TAO_FPAR, tao)
-                except KeyError as exc:
-                    raise AdwinArgumentError from exc
-            case 'dc':
-                # set 'fake' frequency (no effect with amplitude zero)
-                self.adw.Set_FPar(FREQUENCY_FPAR, 62.5)
-                # set zero amplitude
-                self.adw.Set_Par(AMPLITUDE_PAR, 0)
-                # set 'fake' tao
-                self.adw.Set_FPar(TAO_FPAR, 1)
-            case _:
-                raise AdwinArgumentError
+        self._inputs = inputs
+
+        # check that all necessary lockin parameters are given
+        if set(self._lockin_param_list) == set(lockin_params.keys()):
+            try:
+                # Set lockin frequency after checking if its valid
+                freq = lockin_params['frequency']
+                if not MIN_FREQUENCY <= freq <= MAX_FREQUENCY:
+                    raise AdwinLimitError
+                self.adw.Set_FPar(FREQUENCY, freq)
+                # Set lockin amplitude after translating to bit value
+                amp = lockin_params['amplitude']
+                amp_bits = self.aio.qty2bit(amp, card=LOCKIN_CARD,
+                                            channel=LOCKIN_CHANNEL,
+                                            absolute=False)
+                self.adw.Set_Par(AMPLITUDE, amp_bits)
+                # Set phase shift of lockin reference
+                phase = lockin_params['phase']
+                self.adw.Set_FPar(LOCKIN_PHASE, phase)
+                # Set filter constant tao of low pass filter
+                tao = lockin_params['tao']
+                self.adw.Set_FPar(TAO_LOWPASS, tao)
+                # Set length of moving average filter ( in multiples of
+                # lockin period)
+                maf = lockin_params['maf']
+                self.adw.Set_Par(MAF, maf)
+                # Set lockin flag
+                lockin_flag = True
+            except KeyError as exc:
+                raise AdwinArgumentError from exc
+        else:
+            log.warning('Not all lockin parameters set! Falling back to'
+                        +' dc measurement')
+            # Set 'fake' lockin parameters which have no effect
+            self.adw.Set_FPar(FREQUENCY, 125)
+            self.adw.Set_Par(AMPLITUDE, 0)
+            self.adw.Set_FPar(LOCKIN_PHASE, 0)
+            self.adw.Set_FPar(TAO_LOWPASS, 2e-6)
+            self.adw.Set_Par(MAF, 1)
+            lockin_flag = False
 
         # start lockin process
-        log.info('Adwin starting: %s', self._lockin_process.name)
-        self.adw.Start_Process(self._lockin_process_no)
+        log.info('Adwin starting lockin!')
+        self.adw.Start_Process(LOCKIN_PROCESS_NO)
 
         # get actual parameters
-        sample_rate = self.adw.Get_FPar(REPORT_SAMPLERATE_FPAR)
-        self._params['sample_rate'] = sample_rate
+        sample_rate = self.adw.Get_FPar(REPORT_SAMPLE_RATE)
+        self._sample_rate = sample_rate
         # set measurement ready state
         self._state = 'measurement_ready'
         # handle logging for each mode
-        match mode:
-            case 'lockin':
-                freq = self.adw.Get_FPar(REPORT_FREQUENCY_FPAR)
-                log.warning('ADwin: lock-in: frequency = %s Hz. '
-                            + 'amplitdue = %s V, tao = %s s, '
-                            + 'sample_rate = %s', freq, amp, tao,
-                            sample_rate)
-            case 'dc':
-                log.warning('ADwin dc measurement initialized with '
-                            + 'sample_rate = %s', sample_rate)
+        if lockin_flag is True:
+            freq = self.adw.Get_FPar(REPORT_FREQUENCY)
+            log.warning('ADwin: lock-in: frequency = %s Hz. '
+                        + 'amplitdue = %s V, tao = %s s, '
+                        + 'sample_rate = %s', freq, amp, tao,
+                        sample_rate)
+        else:
+            log.warning('ADwin dc measurement initialized with '
+                        + 'sample_rate = %s', sample_rate)
 
     def stop_measurement(self):
         """ Stops the lockin process. No lockin signal is applied and no
             readout is triggered by a sweep anymore. """
         self._check_measurement_active()
-        log.info('Adwin stopping: %s', self._lockin_process.name)
-        self.adw.Stop_Process(self._lockin_process_no)
+        log.info('Adwin stopping lockin')
+        self.adw.Stop_Process(LOCKIN_PROCESS_NO)
         self._state = 'processes_loaded'
 
 ########################################################################
 ########################## OTHER FUNCTIONS #############################
 ########################################################################
 
-    def read_outputs(self, channel:int|str=None, out_format='qty'):
+    def get_lockin_frequency(self):
+        ''' Return lockin frequency '''
+        return self.adw.Get_FPar(REPORT_FREQUENCY)
+
+    def get_sample_rate(self):
+        ''' Return lockin frequency '''
+        return self.adw.Get_FPar(REPORT_SAMPLE_RATE)
+
+    def get_duration(self):
+        ''' Return duration of the next sweep '''
+        return self.adw.Get_FPar(REPORT_DURATION)
+
+    def is_lockin_active(self) -> int: 
+        ''' Return 1 if lockin is active, 0 otherwise '''
+        return self.adw.Get_Par(LOCKIN_ACTIVE)
+
+    def _get_output_par(self, card, channel):
+        ''' By convention the Output Par holding the current output
+            value is defined like this '''
+        return card * 10 + channel
+
+    def list_connected_outputs(self):
+        ''' Return copy of dictionary of all outputs '''
+        return self.aio.list_connected_outputs()
+
+    def read_outputs(self, out_format='qty', select='connected'):
         """ Read the current saved output values of the ADwin. After a 
             restart this might not be the correct values. """
         # Read all adwin parameters holding the current output values
-        match channel:
-            case int():
-                val = self.adw.Get_Par(channel)
-                if out_format == 'qty':
-                    return self.aio.bit2qty(val, channel, absolute=True)
-                elif out_format == 'bit':
-                    return val
-                else:
-                    raise AdwinArgumentError
-            case str():
-                raise AdwinNotImplementedError
-            case None:
-                if out_format == 'qty':
-                    outs = np.empty(NB_OUTS)
-                    outs.fill(np.NaN)
-                    for i, _ in enumerate(outs):
-                        val =  self.adw.Get_Par(i+1)
-                        outs[i] = self.aio.bit2qty(val, i+1, True)
-                elif out_format == 'bit':
-                    outs = []
-                    for i in range(NB_OUTS):
-                        outs.append(self.adw.Get_Par(i+1))
-                else:
-                    raise AdwinArgumentError
-                return outs
-            case _:
+        outs = {}
+        if select == 'connected':
+            outs_list = self.aio.list_connected_outputs()
+        elif select == 'all':
+            outs_list = self.aio.list_all_outputs()
+
+        else:
+            raise AdwinArgumentError
+
+        for name in outs_list:
+            card, channel = self.aio.get_card_channel(name)
+            par_no = self._get_output_par(card, channel)
+            par_val = self.adw.Get_Par(par_no)
+            if out_format == 'qty':
+                outs[name] = self.aio.bit2qty(par_val, card=card,
+                                             channel=channel,
+                                             absolute=True)
+            elif out_format == 'bit':
+                outs[name] = par_val
+            else:
                 raise AdwinArgumentError
+        return outs
 
     def stop_sweep(self):
         """ Stopping sweep process immediately """
-        log.info('Adwin stopping: %s', self._sweep_process.name)
-        self.adw.Stop_Process(self._sweep_process_no)
+        log.info('Adwin stopping sweep.')
+        self.adw.Stop_Process(SWEEP_PROCESS_NO)
 
-    def set_output_buffer(self, outs, val_format='qty'):
+    def set_output_buffer(self, outs:dict, val_format='qty'):
         ''' Set the buffer in which the Adwin saveds the current output
-            values of the DAC's (Par_1 - Par_8 so far). This can be 
-            useful after a reboot of the adwin in which the adwin can
-            loose this information. '''
-        if val_format in ['qty', 'wp']:
-            outs = self.aio.qty2bit(outs)
-        if len(outs) != NB_OUTS:
-            raise AdwinArgumentError
-        for idx, val in enumerate(outs):
-            self.adw.Set_Par(idx+1, int(val))
+            values of the DAC's. This can be useful after a reboot of
+            the adwin in which the adwin can loose this information. '''
+        for name, val in outs.items():
+            # If output value is given as physical quantity-> translate
+            if val_format is 'qty':
+                val = self.aio.qty2bit(val, name=name, absolute=True)
+            # Get ADbasic Par No. of output 'key' defined by convention
+            card, channel = self.aio.get_card_channel(name)
+            par_no = self._get_output_par(card, channel)
+            # Set ADbasic Par of for the output                        
+            self.adw.Set_Par(par_no, int(val))
 
     def _start_sweep(self, target, duration, delay=0.05):
         # set sweep parameters
-        self.adw.Set_FPar(DURATION_FPAR, duration)
-        target_bits = self.aio.qty2bit(target)
-        self.adw.SetData_Long(target_bits, TARGET_DATA, 1,
+        self.adw.Set_FPar(SWEEP_DURATION, duration)
+        # first we need all the current outputs of the adwin as list of
+        # bit values sorted by card and channel (this way the adwin fw
+        # gets the command for the target values of a sweep)
+        current_bits = self.read_outputs(out_format='bit', select='all')
+        target_bits = []
+        for name in self.aio.get_sorted_channel_list():
+            if name in list(target):
+                target_bits.append(
+                    self.aio.qty2bit(target[name], name=name))
+            else:
+                target_bits.append(current_bits[name])
+        self.adw.SetData_Long(target_bits, SWEEP_TARGET, 1,
                               len(target_bits))
         log.info('Adwin starting %.1f second sweep.', duration)
         # initialize process
-        self.adw.Start_Process(self._sweep_process_no)
-        # start process after small delay to wait for init to calm down
+        self.adw.Start_Process(SWEEP_PROCESS_NO)
+        # start process after small delay to wait for init to finish
         sleep(delay)
-        self.adw.Set_Par(SWEEP_ACTIVE_PAR, 1)
+        self.adw.Set_Par(SWEEP_ACTIVE, 1)
 
     def _check_measurement_active(self):
         # just check the state of the adwin driver. It could be done by
@@ -399,9 +452,86 @@ class adwin_spin_transistor(Instrument):
             raise AdwinModeError
 
     def _warn_if_fifo_to_small(self, duration):
-        if duration * self._params['sample_rate'] > FIFO_LEN:
+        if duration * self._sample_rate > FIFO_LEN:
             log.warning('ADwin: Fifo holds values for max %s seconds.',
-            FIFO_LEN / self._params['sample_rate'])
+            FIFO_LEN / self._sample_rate)
+
+    def _read_adwin_firmware(self):
+        try:
+            fw_int32 = self.adw.Get_Par(VERSION_PROCESS_1)
+            firmware, version = decode_adbasic_firmware(fw_int32)
+            msg = (f'Adwin: Detected firmware {firmware}, version = '
+                 + f'{version}.')
+            log.warning(msg)
+            return(firmware, version)
+        except adw.ADwinError:
+            msg = ('Adwin: Cannot detect ADwin firmware, because it is '
+                 + 'not responding. Adwin turn off, just turn on, not '
+                 + 'connected or overloaded.')
+            log.warning(msg)
+            return(None, None)
+
+    def _bootload(self, processor, lockin_filter):
+        # before boot try to read the current outputs, which can
+        # fail if the adwin was power cycled and never booted since
+        firmware, version = self._read_adwin_firmware()
+        # Initialize output_buffer to 0V for all outputs
+        output_buffer = self.aio.output_zero_dict()
+        # Depending on detected firmware read the current outputs
+        if firmware == 'SPIN-TRANSISTOR':
+            output_buffer.update(self.read_outputs(out_format='bit'))
+            output_values = self.read_outputs(out_format='qty')
+            msg = ('Adwin: Current firrmware: Spin-Transistor: '
+                 + f'{version}. Current outputs are {output_values}')
+            log.warning(msg)
+            log.warning(self.read_outputs(out_format='bit'))
+        elif firmware == 'NANOQT':
+            output_buffer = read_nanoqt_outputs(self.adw)
+            msg = (f'Adwin: Current firmware: NanoQt: {version}. The '
+                    + 'current outputs have been recovered to ensure a '
+                    + 'nice ride with Spin-Transistor firmware.')
+            log.warning(msg)
+        elif firmware is None or firmware == 'unknown':
+            msg = ('Adwin: Current firmware: unknown. Setting output '
+                + 'buffer to zero! If uutputs are not zero, recover '
+                + 'them by setting the ouput buffer manually using '
+                + 'set_output_buffer() BEFORE FIRST SWEEP OR '
+                + 'INIT_MEASUREMENT!')
+            log.critical(msg)
+        else:
+            log.critical('ADwin: YOU SHOULD NOT SEE THIS MEASSAGE!')
+
+        #boot adwin
+        btl_name = f"ADwin{processor.replace('T', '')}.btl"
+        btl_path = Path(self.adw.ADwindir) / btl_name
+        self.adw.Boot(str(btl_path))
+
+        # Set output buffer
+        self.set_output_buffer(output_buffer, val_format='bit')
+
+        self._state = 'booted'
+
+        # load processes
+        adbasic_dir = Path(__file__).parent / 'adwinlib' / 'spin-transistor'
+        lockin_fname = f'Pro2_{processor}_lockin_{lockin_filter}.TB1'
+
+        ######################################################################################################
+        # DEBUG OVERWRITE
+        lockin_fname = f'Pro2_T11T12_lockin_{lockin_filter}.TB1'
+        sweep_fname = 'Pro2_T11T12_sweep.TB2'
+
+        lockin_process = adbasic_dir / lockin_fname
+        log.info('Adwin loading: %s', lockin_process.name)
+        self.adw.Load_Process(str(lockin_process))
+        sweep_process = adbasic_dir / sweep_fname
+        log.info('Adwin loading: %s', sweep_process.name)
+        self.adw.Load_Process(str(sweep_process))
+
+        self._state = 'processes_loaded'
+
+        self.adw.Set_Par(1, 0x01000000)
+
+
 
 if __name__ == '__main__':
     pass
