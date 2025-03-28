@@ -45,7 +45,6 @@ soft_config = {
 
 '''
 
-from copy import deepcopy
 import math
 from math import sqrt, atan2
 import logging as log
@@ -148,23 +147,21 @@ class AdwinIO():
         So far 16-bit output cards are assumed. '''
     def __init__(self, hard_config:dict, soft_config:dict):
         # save a copy of hard_config (which should never be changed)
-        self.__hard_config = deepcopy(hard_config)
+        self.__hard_config = {**hard_config}
+        self.__soft_config = {**soft_config}
         # save configuration outputs, in which the scaling factor will be
         # updated by the soft_config and runtime changes
-        self._cfg = {'out': hard_config['outputs'],
-                     'in': hard_config['inputs']}
-        self._no_output_channels = hard_config['no_output_channels']
+        self._ports = {**hard_config['outputs'],
+                       **hard_config['inputs'],
+                       **hard_config['nc']}
+
         # soft config
-        self._readout_ch = None
         self.update_soft_config(**soft_config)
 
     def update_soft_config(self,
                            vdivs: dict = None,
-                           iv_gain: dict = None,
-                           readout_channel: str = None):
+                           iv_gain: dict = None):
         ''' update soft configuration parameters '''
-        if readout_channel:
-            self._readout_ch = readout_channel
         if vdivs:
             self.set_voltage_diviers(vdivs)
         if iv_gain:
@@ -180,7 +177,8 @@ class AdwinIO():
                 if not 0.0001 <= vdiv <= 1:
                     raise AdwinLimitError
                 base_scale = self.__hard_config['outputs'][name]['scale']
-                self._cfg['out'][name]['scale'] = base_scale * vdiv
+                self._ports[name]['scale'] = base_scale * vdiv
+                self.__soft_config[name] = vdiv
         else:
             raise AdwinArgumentError
 
@@ -191,102 +189,120 @@ class AdwinIO():
         if isinstance(iv_gain, dict):
             for name, gain in iv_gain.items():
                 base_scale = self.__hard_config['inputs'][name]['scale']
-                self._cfg['in'][name]['scale'] = base_scale / gain
+                self._ports[name]['scale'] = base_scale / gain
+                self.__soft_config[name] = gain
         else:
             raise AdwinArgumentError
 
-    def qty2bit(self, values:dict|ndarray|int|float,
-                channel:str|int=None, absolute:bool=True):
+    def qty2bit(self, values:int|float, name:str=None, card:int=None,
+                channel:int=None, absolute:bool=True):
         ''' Transform the physical quantities of the outputs into bit
-            values using the given information about the used setup 
-            All configured output channels will be translated based on
-            the index in the given list. Index 0 will be treated as
-            output channel 1 an so for. All undefined channels will be
-            set to zero.'''
-        # check the type of values to decide what the function should do
-        match values:
-            # if values is dict, the keys should be channels, the values
-            # should be single values|list|array of values.
-            # Then for each channel the function will recursively be
-            # called to transform each channel seperately.
-            case dict():
-                # create output array and initialize with DAC_ZERO
-                res = np.empty(self._no_output_channels)
-                res.fill(2**15)
-                for name, qty in values.items():
-                    if name in self._cfg['out']:
-                        idx = self._cfg['out'][name]['channel'] - 1
-                    else:
-                        msg = 'ADwinIO: neglected given input ch.'
-                        log.warning(msg)
-                    res[idx] = self.qty2bit(qty, name, absolute)
-                return res
-            # if channel number is given instead of name, translate
-            # into channel name (only works for output channels).
-            case list() | ndarray() | int() | float():
-                if isinstance(channel, int):
-                    channel = self._get_output_channel_name(channel)
-                if not self.is_channel(channel):
-                    log.critical('ADwinIO: channel %s does not exist.',
-                                 channel)
+            values using the given information about the used setup '''
+
+        if name is not None:
+            if name == 'input':
+                port_name = self.__hard_config['inputs'].keys()[0]
+            else:
+                port_name = name
+        elif card is not None and channel is not None:
+            port_name = self.get_name(card, channel)
+            # check that if name, channel and card are given, that the
+            # match
+            if name is not None:
+                if port_name != name:
+                    msg = (f'Adwin: {name}: card={card} and channel='
+                          +f'{channel} are not consistent.')
+                    log.warning(msg)
                     raise AdwinArgumentError
-                inout = self._channel_direction(channel)
-                scale = self._cfg[inout][channel]['scale']
-                bits = self._cfg[inout][channel]['bits']
-                return volt2bit(values, bits, scale, absolute)
-            # in all other cases raise error
-            case _:
-                log.critical('AdwnIO: type(values) not supported.')
-                raise AdwinArgumentError
+        else:
+            log.critical('Adwin: Output/Input not known.')
+            raise AdwinArgumentError
 
+        scale = self._ports[port_name]['scale']
+        bits = self._ports[port_name]['bits']
+        return volt2bit(values, bits, scale, absolute)
 
-    def bit2qty(self, values:ndarray|list|int|float, channel:str|int,
-                absolute:bool):
-        ''' Translate bit values of out/inputs physical quantity into bit value
-            using the information of the scaling factor of the out/input and
-            how many bits the corresponding card has. The value should be a
-            single value of a list of values of one channel.'''
-        if channel == 'readout':
-            channel = self._readout_ch
-        if isinstance(channel, int):
-            # Channel int should represent the output numnber of the channel
-            # starting from 1
-            channel = self._get_output_channel_name(channel)
-        # Now the channel name should be known -> translate values
-        if self.is_channel(channel):
-            inout = self._channel_direction(channel)
-            scale = self._cfg[inout][channel]['scale']
-            bits = self._cfg[inout][channel]['bits']
-            return bit2volt(values, bits, scale, absolute)
-        elif channel is None:
-            return None 
-        # if nothing could be returned, raise error
-        raise AdwinArgumentError
+    def bit2qty(self, values:int|list, name:str=None, card:int=None,
+                    channel:int=None, absolute:bool=False):
+        ''' Translate bit values of any channel into the physical
+            quantity using the information of the scaling factor, the 
+            resolution of the card and any used voltage divider or gain
+            between sample and channel. Either the name or both card and
+            channel number have to be specified. For absolute=True,
+            zero is bit 0 and absolute=False zero is the middle of the
+            bit value range'''
+        if name is not None:
+            if name == 'input':
+                input_list = list(self.__hard_config['inputs'])
+                if len(input_list) == 1:
+                    port_name = input_list[0]
+                elif len(input_list == 0):
+                    log.critical('ADwin: No input configured.')
+                    raise AdwinArgumentError
+                else:
+                    log.critical('ADwin: More than one input configured'
+                                + '. Please specify input by name.')
+                    raise AdwinArgumentError
+            else:
+                port_name = name
+        elif card is not None and channel is not None:
+            port_name = self.get_name(card, channel)
+            # check that if name, channel and card are given, that the
+            # match
+            if name is not None:
+                if port_name != name:
+                    msg = (f'Adwin: {name}: card={card} and channel='
+                          +f'{channel} are not consistent.')
+                    log.warning(msg)
+                    raise AdwinArgumentError
+        else:
+            log.critical('Adwin: Output/Input not known.')
+            raise AdwinArgumentError
 
-    def is_channel(self, channel:str):
-        ''' check if channel is configured '''
-        if self._channel_direction(channel) in ['in', 'out']:
-            return True
-        return False
+        scale = self._ports[port_name]['scale']
+        bits = self._ports[port_name]['bits']
+        return bit2volt(values, bits, scale, absolute)
 
-    def list_channels(self, inout:str):
-        ''' return a list of the names of all configured inout (inputs/outputs)
-            channels '''
-        return self._cfg[inout].keys()
-
-    def _channel_direction(self, channel):
-        if channel in self._cfg['out']:
-            return 'out'
-        if channel in self._cfg['in']:
-            return 'in'
+    def get_name(self, card:int, channel:int):
+        ''' Return name of the Output/Input of card, channel '''
+        for key, val in self._ports.items():
+            if val['card'] == card and val['channel'] == channel:
+                return key
         return None
 
-    def _get_output_channel_name(self, channel):
-        if isinstance(channel, int):
-            for key, val in self._cfg['out'].items():
-                if val['channel'] == channel:
-                    return key
-        return None
+    def list_connected_outputs(self):
+        ''' List names of connected outputs of the ADwin '''
+        return list(self.__hard_config['outputs'])
+
+    def list_all_outputs(self):
+        ''' List names of all outputs of the ADwin '''
+        return list(self.__hard_config['outputs']) + list(self.__hard_config['nc'])
+
+    def get_config(self):
+        ''' Return current adwin configuration (ports,IVconv,dviv) ''' 
+        return {'hard_config': {**self.__hard_config}, 
+                'solf_config': {**self.__hard_config}}
+
+    def output_zero_dict(self):
+        ''' Return a dictionary with the names of all adwin outputs
+            and the values representing the bit values at which the
+            outputs are 0V '''
+        names = self.list_all_outputs()
+        zdict = {}
+        for name in names:
+            zdict[name] = 2**(self._ports[name]['bits']-1)
+        return  zdict
+
+    def get_card_channel(self, name):
+        ''' Return the card and channel number of output with "name" '''
+        return self._ports[name]['card'], self._ports[name]['channel']
+
+    def get_sorted_channel_list(self):
+        ''' Return a list of all output channel names ordered first by
+            card and then by channel number '''
+        outs = self.list_all_outputs()
+        return sorted(outs, key=lambda name: (self._ports[name]['card'],
+                      self._ports[name]['channel']))
 
 if __name__ == '__main__':
     pass

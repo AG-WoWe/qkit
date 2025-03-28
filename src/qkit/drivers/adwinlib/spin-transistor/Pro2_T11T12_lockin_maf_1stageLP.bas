@@ -1,0 +1,292 @@
+'<ADbasic Header, Headerversion 001.001>
+' Process_Number                 = 1
+' Initial_Processdelay           = 3000
+' Eventsource                    = Timer
+' Control_long_Delays_for_Stop   = No
+' Priority                       = High
+' Version                        = 1
+' ADbasic_Version                = 6.4.0
+' Optimize                       = Yes
+' Optimize_Level                 = 1
+' Stacksize                      = 1000
+' Info_Last_Save                 = DESKTOP-0M2IFQQ  DESKTOP-0M2IFQQ\kaptn
+'<Header End>
+' ADwin lockin driver written by Luca Kosche in April 2024
+' Idea:
+'   * measure input at input_channel with 18-bit resolution
+'   * lockin signal output on lockin_channel 
+'   * lockin demodulation by reference signal + low pass filtering
+'   * write (subsampled) lockin results and raw input to FIFOs (if measurement flag is set)
+
+' Background of implementation:
+'   * Delay between input and output leads to shifts and jitter
+'   * -> set output first, then fetch the already measured input
+'   * The lockin process is seperate from the sweep process to optimize for fast lockin out/input.
+'   * The lockin signal is calculated in the init and saved to an array to minimize calculation times
+'   * -> for the phase shifted references the same array is used, but the index is shifted by a quarter period. 
+'   * length of the lockin_sig/lockin_ref arrays are limited by local memory and limit the frequency to min 62.5Hz.
+'   * -> This can easily be changed by increasing 'lockin_len' and removing 'at dm_local' at the expense of processing time.
+'   * Output and input cards and lockin channels are hard coded because this saves calculation time in event.
+'   * The lockin signal is always added to the bias value set by the sweep process. Only when the lockin is inctive,
+'   * the sweep process can write a value to the lockin output channel.
+
+'SPECIALITIES ABOUT T11 AND 18-BIT INPUT CARD:
+'With T11 processor, it is crucial to optimize every command to archive the processdelay of 600, 
+'which which is the maximum sample rate of the 18-bit input card (500kHz | 2us)
+'only the 18-bit card can work in timer mode enabled by "P2_ADCF_Mode(2, 1)". Thereby the card is 
+' automatically triggered to give a new measurement at the beginning of each event cycle.
+
+'WHAT COULD BE DONE WITH T12, 16-BIT INPUT CARD, FIFO OUTPUT CARD?
+'Faster lockin cycle enabling higher lockin frequencies
+'moving average in the 16-bit card.
+'with output card with fifo, the lockin output could be handled by the fifo.
+
+#Include ADwinPro_All.Inc
+
+'debugging
+#define debug_mode        0
+' TEST: IS IT BETTER TO HAVE A SYMMETRIC LOCKIN SIGNAL (= DEVIDABLE BY 4)?????????
+
+'hard coded settings
+#define input_card        2                                                                     
+#define input_channel     7
+#define lockin_card       3
+#define lockin_channel    8         'this cannot simply changed here, but also needs to implemented fo2 adding lockin to channel
+#define version           01010001h 'Version: Spintransistor.lockin.0.1
+
+#define process_time      2E-6      'time of one event cycle (=500kHz)
+#define DAC_ZERO          32768
+#define DAC_ZERO_18       131072    
+#define PI                3.1415927
+#define fifo_len          1000003
+#define lockin_len        8003      '8003 gives a minimum lockin frequency of 62.48Hz @ 2us cycle time.
+#define maf_array_len     40100
+
+'communication PC and other Processes
+#define fw_version          Par_1
+#define lockin_bias         Par_38  'command from PC or sweep process: add lock-in bias to lockin output
+#define lockin_active       Par_3   'report to PC and sweep process: lockin is running
+#define meas_active         Par_4   'command from PC or sweep process: write values to FIFO
+#define amplitude           Par_5   'command from PC: set lock-in amplitude (bits)
+#define frequency           FPar_5  'command from PC: set lock_in frequency (Hz)
+#define report_frequency    FPar_6  'report to PC: current lock_in frequency (Hz)
+#define lockin_phase        FPar_7  'command from PC: set phase shift of reference signal (radians)
+#define sample_rate         FPar_8  'command from PC: set sample rate (Hz) for subsampling
+#define report_sample_rate  FPar_9  'report to PC: current sample rate (Hz)
+#define tao_lowpass         FPar_10 'command from PC: set time constant of low pass filter
+#define maf                 Par_6   'command from PC: moving average filter length (in periods of lockin signal)
+#define fifo_inphase        Data_1  'data transmission to PC: inphase component of lock-in
+#define fifo_quadrature     Data_2  'data transmission to PC: quadrature component of lock-in
+#define fifo_input          Data_3  'data transmission to PC: raw input signal before lock-in demodulation
+
+'ADwin internal only
+#define lockin_sig          Data_4  'holds lockin output signal
+#define lockin_ref          Data_5  'holds lockin reference signal for inphase component
+#define lockin_ref90        Data_6  'holds lockin reference signal for quadrature component
+
+' DEBUG
+'dim t1, t2, dt as long
+'dim measure_cycle as long
+
+dim lockin_in, lockin_out as long
+dim fifo_inphase[fifo_len], fifo_quadrature[fifo_len] as float as fifo
+dim fifo_input[fifo_len] as long as fifo
+dim subsampling_counter, subsampling_samples as long
+dim lockin_samples, lockin_idx as long
+dim inph_dem, quad_dem, inph, quad as float
+
+#IF Processor = T12 THEN
+dim lockin_sig[lockin_len] as long    'lockin output signal in bit steps for output card
+dim lockin_ref[lockin_len] as float   'lockin internal reference
+dim lockin_ref90[lockin_len] as float '90 degree shifted reference (more memory but faster calculation)
+#ELSE                                 'T11 can save the arrays in local memory:
+dim lockin_sig[lockin_len] as long at dm_local
+dim lockin_ref[lockin_len] as float at dm_local
+dim lockin_ref90[lockin_len] as float at dm_local
+#ENDIF
+
+' LOCKIN OUTPUT AND REFERENCES
+sub create_lockin_signal()
+  dim sig_phase, ref_phase, ref90_phase as float
+  dim i as long
+  'FIND HOW MANY SAMPLES ARE NEEDED FOR ONE FULL SINE WAVE AT GIVEN FREQUENCY
+  lockin_samples = Round(1 / (frequency * process_time))
+  'INCREASE TILL IT IS DEVIDABLE BY 4. (EASIER REFERENCE HANDLING, BUT ONLY CERTAIN FREQUENCIES POSSIBLE
+  if (lockin_samples and 11b <> 0) then
+    do 
+      Inc lockin_samples
+    until (lockin_samples and 11b = 0)
+  endif
+  'REPORT ACTUAL FREQUENCY
+  report_frequency = 1 / (lockin_samples * process_time)
+  'CREATE LOCKIN SIGNAL
+  for i = 1 to lockin_samples
+    sig_phase = 2 * PI * i / lockin_samples           'phase of lockin output signal
+    ref_phase = sig_phase - lockin_phase              'phase of reference signal 
+    ref90_phase = ref_phase - (PI / 2)                'reference phase shifted by 90 degree
+    lockin_sig[i] = Round(amplitude *  sin(sig_phase))
+    lockin_ref[i] = sin(ref_phase)
+    lockin_ref90[i] = sin(ref90_phase)
+  next i
+endsub
+
+' LOCKIN FILTER OF DEMODULATED SIGNAL (different filter in different scripts)
+dim quad_maf[maf_array_len], inph_maf[maf_array_len], maf_buffer, maf_inph_out, maf_quad_out as float 'maf
+dim maf_idx, maf_len as long                         'maf
+dim kappa as float                                   'low pass
+
+sub init_lockin_filter()
+  'initialize maf filter (maf=0 -> disbale, maf>0 multiple of lockin period)
+  dim i as long
+  if (maf > 0) then
+    maf_len = lockin_samples * maf
+  else
+    maf_len = 1
+  endif
+  for i = 1 to maf_len
+    quad_maf[i] = 0
+    inph_maf[i] = 0
+  next i
+  maf_buffer = 0
+  maf_idx = 1
+  maf_inph_out = 0
+  maf_quad_out = 0
+  'Initialize low pass filter
+  kappa = 1 - exp(-process_time / tao_lowpass)
+  inph = 0
+  quad = 0
+  Par_43 = kappa
+endsub
+sub apply_lockin_filter()
+  'maf filter
+  maf_buffer = inph_maf[maf_idx]
+  inph_maf[maf_idx] = inph_dem
+  maf_inph_out = maf_inph_out + (inph_dem - maf_buffer) / maf_len
+  maf_buffer = quad_maf[maf_idx]
+  quad_maf[maf_idx] = quad_dem
+  maf_quad_out = maf_quad_out + (quad_dem - maf_buffer) / maf_len
+  'low pass on maf output
+  inph = inph + kappa * (maf_inph_out - inph)
+  quad = quad + kappa * (maf_quad_out - quad)
+endsub
+sub cycle_maf_idx()
+  if (maf_idx = maf_len) then
+    maf_idx = 1
+  else
+    Inc maf_idx
+  endif
+endsub
+
+
+init:
+  'SET PROCESSDELAY
+#IF Processor = T12 THEN
+  Processdelay = process_time * 1e9
+#ELSE
+  Processdelay = process_time * 300e6
+#ENDIF
+
+  ' IF DEBUG MODE: SET DEFAULT VALUES
+  'meas_active = 1
+  'measure_cycle = 1
+  'Par_45 = 1000
+  
+  IF (debug_mode = 1) THEN
+    lockin_bias = DAC_ZERO
+    amplitude = DAC_ZERO
+    frequency = 91.31
+    maf = 3
+    sample_rate = 500e3
+    lockin_phase = 0
+    meas_active=1
+  ENDIF
+  
+  ' CLEAR FIFOS FOR CLEAN TRANSMISSION
+  fifo_clear(1)
+  fifo_clear(2)
+  fifo_clear(3)
+ 
+  ' INITIALIZE SUBSAMPLING
+  subsampling_samples = Round(1 / (sample_rate * process_time))
+  report_sample_rate = 1 / (subsampling_samples * process_time)
+  subsampling_counter = 1
+  
+  ' INITIALIZE LOCKIN
+  create_lockin_signal()
+  init_lockin_filter()
+  lockin_idx = 1
+  fw_version = version
+  lockin_active = 1 'lockin active flag for PC
+  
+  ' CALCULATE FIRST LOCKIN OUTPUT
+  lockin_out = lockin_bias + lockin_sig[lockin_idx]
+  
+  'ACTIVATE TIMER MODE FOR INPUT CARD (manual says don't mix with a second process, but so far it worked?)
+  P2_ADCF_Mode(Shift_Left(1, input_card - 1), 1)
+  
+event:
+  ' WRITE LOCKIN OUTPUT [3 lockin_samples (+2 jitter, comm)] 
+  P2_DAC(lockin_card, lockin_channel, lockin_out)
+
+  ' READ LOCK-IN INPUT AND CONVERT TO 18 bits [93-99 lockin_samples]
+  lockin_in = Shift_Right(P2_Read_ADCF24(input_card, input_channel), 6) - DAC_ZERO_18 '18-bit resolution  
+
+  ' LOCKIN DEMODULATION
+  inph_dem = lockin_in * 2 * lockin_ref[lockin_idx]   'demodulated inphase
+  quad_dem = lockin_in * 2 * lockin_ref90[lockin_idx] 'demodulated quadrature
+  
+  ' filter demodulated signal
+  apply_lockin_filter() 'inputs inph_dem,quad_dem outputs sf, cf
+  
+  ' TRANSMIT DATA TOPC [max 103 during cycles measurement, 11 cycles no measurement]
+  if (meas_active = 0) then
+    'don't save data (faster this way, because else is processed faster than if)
+  else
+    'SUBSAMPLE
+    if (subsampling_counter < subsampling_samples) then
+      Inc subsampling_counter
+    else
+      subsampling_counter = 1
+      'SEND DATAPOINT TO FIFO (27cycles per FIFO with no sweep)
+      fifo_inphase = inph
+      fifo_quadrature = quad
+      fifo_input = lockin_in
+    endif
+  endif
+
+  ' CYCLE LOCKIN IDX (18 or 9 cycles, depending on case)
+  if (lockin_idx >= lockin_samples) then
+    lockin_idx = 1
+  else
+    Inc lockin_idx
+  endif
+  
+  cycle_maf_idx()
+  
+  'CALCULATE NEXT LOCKIN OUTPUT [13 lockin_samples]
+  lockin_out = lockin_bias + lockin_sig[lockin_idx]
+  
+  
+  'debug
+  'if (measure_cycle = 500e3) then
+  '  meas_active=0
+  'endif
+  'Inc measure_cycle
+  
+  't1 = Read_Timer()
+  't2 = Read_timer()
+  
+  'dt = t2 - t1 - 2
+  'if (Par_42 < dt) then
+  '  Par_42 = dt
+  'else
+  '  Par_43 = dt
+  'endif
+  
+  
+  
+finish:
+  ' SET OUTPUT TO LOCKIN_BIAS
+  P2_DAC(lockin_card, lockin_channel, lockin_bias)
+  ' DISABLE LOCKIN ACTIVE FLAG
+  lockin_active = 0
