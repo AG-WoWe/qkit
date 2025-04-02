@@ -20,7 +20,7 @@
 'for the next sweep, if nothing else is given by the PC. Problems can arise after repowering or rebooting the adwin,
 'because the sweep_start array might not be filled with the ecpected values.
 
-#Include ADwinPro2.Inc
+#Include ADwinPro_All.Inc
 
 #define process_time       200E-6   '-> sweep update rate = 5kHz (must be high enough to don't overload ADwin)
 #define DAC_ZERO           32768
