@@ -70,6 +70,7 @@ from qkit.drivers.adwinlib.nanoqt_tools import read_nanoqt_outputs
 # the process
 
 # HARD CODED IN SWEEP AND LOCKIN PROCESS
+PROCESS_TIME = 2e-6
 LOCKIN_ACTIVE = 3      # Reports: "1" if lockin process is active
 MEASURE_ACTIVE = 4     # Command: lockin process to write data to FIFOS
 LOCKIN_BIAS = 38       # Command: lockin process to add bias to lockin
@@ -92,6 +93,8 @@ INS = { 'inph': 1,     # Data_1: (float) Inphase data FIFO
 LOCKIN_CARD = 3        # Hard coded: DAC card for lockin output
 LOCKIN_CHANNEL = 8     # Hard coded: DAC channel for lockin output
 LOCKIN_LEN = 8003      # Hard coded: Length of lockin signal arrays
+MAF_ARRAY_LEN = 40100
+
 
 #HARD CODED IN SWEEP PROCESS
 VERSION_PROCESS_2 = 2  # Read: (Par)  Version of sweep process
@@ -296,11 +299,27 @@ class adwin_spin_transistor(Instrument):
                 self.adw.Set_FPar(LOCKIN_PHASE, phase)
                 # Set filter constant tao of low pass filter
                 tao = lockin_params['tao']
-                self.adw.Set_FPar(TAO_LOWPASS, tao)
+                if isinstance(tao, (float, int)) and tao > PROCESS_TIME:
+                    self.adw.Set_FPar(TAO_LOWPASS, tao)
+                else:
+                    log.info('ADwin: Lockin: No lowpass applied')
+                    self.adw.Set_FPar(TAO_LOWPASS, PROCESS_TIME)
                 # Set length of moving average filter ( in multiples of
                 # lockin period)
                 maf = lockin_params['maf']
-                self.adw.Set_Par(MAF, maf)
+                if isinstance(maf, int):
+                    maf_len = maf / (PROCESS_TIME * freq)
+                    if maf_len < MAF_ARRAY_LEN:
+                        self.adw.Set_Par(MAF, maf)
+                    else:
+                        log.error('Adwin: Lockin: maf too big!')
+                        raise AdwinArgumentError
+                elif maf is None:
+                    log.info('ADwin: Lockin: No maf applied')
+                    self.adw.Set_Par(MAF, 0)
+                else:
+                    log.error('Adwin: Lockin: maf val supported')
+                    raise AdwinArgumentError
                 # Set lockin flag
                 lockin_flag = True
             except KeyError as exc:
@@ -513,12 +532,17 @@ class adwin_spin_transistor(Instrument):
 
         # load processes
         adbasic_dir = Path(__file__).parent / 'adwinlib' / 'spin-transistor'
-        lockin_fname = f'Pro2_{processor}_lockin_{lockin_filter}.TB1'
 
-        ######################################################################################################
-        # DEBUG OVERWRITE
-        lockin_fname = f'Pro2_T11T12_lockin_{lockin_filter}.TB1'
-        sweep_fname = 'Pro2_T11T12_sweep.TB2'
+        if processor == 'T11':
+            ext = 'TB'
+        elif processor == 'T12':
+            ext = 'TC'
+        else:
+            log.error(f'Adwin: Processor {processor} not supported.')
+            raise AdwinFirmwareError
+
+        lockin_fname = f'Pro2_T11T12_lockin_{lockin_filter}.{ext}1'
+        sweep_fname = f'Pro2_T11T12_sweep.{ext}2'
 
         lockin_process = adbasic_dir / lockin_fname
         log.info('Adwin loading: %s', lockin_process.name)

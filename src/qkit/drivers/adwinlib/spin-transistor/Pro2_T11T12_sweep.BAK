@@ -20,13 +20,13 @@
 'for the next sweep, if nothing else is given by the PC. Problems can arise after repowering or rebooting the adwin,
 'because the sweep_start array might not be filled with the ecpected values.
 
-#Include ADwinPro2.Inc
+#Include ADwinPro_All.Inc
 
 #define process_time       200E-6   '-> sweep update rate = 5kHz (must be high enough to don't overload ADwin)
 #define DAC_ZERO           32768
 #define output_card        3
 #define nb_outs            8        'number of outputs
-#define version            01020001h    'Version Spintransistor.Sweep.0.1
+#define version            01020001h'Version Spintransistor.Sweep.0.1
 
 #define fw_version         Par_2    'adbasic version of process_number 2
 

@@ -26,7 +26,7 @@ class Tuning_ST(Tuning):
             self._end_measurement()
 
 
-    def measure2D(self, data_to_show = None):
+    def measure2D(self, data_to_show = None, wait_time=None):
         """
         Starts a 2D - measurement, with y being the inner and x the outer loop coordinate.
         
@@ -37,7 +37,7 @@ class Tuning_ST(Tuning):
         """
         assert self._x_parameter, f"{__name__}: Cannot start measure2D. x_parameters required."
         assert self._y_parameter, f"{__name__}: Cannot start measure2D. y_parameters required."
-        self._measurement_object.measurement_func = "%s: measure2D" % __name__
+        self._measurement_object.measurement_func = f"{__name__}: measure2D"
         pb = Progress_Bar(len(self._x_parameter.values))
 
         self._open_qviewkit(datasets = data_to_show)
@@ -45,12 +45,13 @@ class Tuning_ST(Tuning):
         try:
             for x_val in self._x_parameter.values:
                 # x_wait = self._x_parameter.wait_time
-                self._x_parameter.set_function(x_val)
+                self._x_parameter.set_function(x_val, dt=wait_time)
                 self._acquire_log_functions()
                 latest_trace = self.multiplexer.measure()
                 self._append_vector(latest_trace, self._datasets, direction = 1)
                 pb.iterate(addend = 1)
-                if self.watchdog.stop: break 
+                if self.watchdog.stop:
+                    break
 
         finally:
             self.watchdog.reset()
