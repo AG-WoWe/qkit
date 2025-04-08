@@ -78,43 +78,35 @@ event:
   sweep_in = Shift_Right(sweep_in, 6) - DAC_ZERO_18
   
   'CHECK EMERGENCY STOP
-  if (emergency_stop <> 0) then
-    'SET OUTPUT TO ZERO
-    P2_DAC(output_card, output_channel, DAC_ZERO)
-    voltage = DAC_ZERO
-
-    'STOP SWEEP AND READOUT PROCESS
-    Stop_Process(2)
-    End
-  endif
+  if (emergency_stop <> 0)
   
-    'CHECK VOLTAGE TO REPORT
-    if (voltage >= report_voltage) then
+  'CHECK VOLTAGE TO REPORT
+  if (voltage >= report_voltage) then
 
-      'CALCULATE RESISTANCE
-      resist = (voltage-DAC_ZERO)/(sweep_in)
+    'CALCULATE RESISTANCE
+    resist = (voltage-DAC_ZERO)/(sweep_in)
     
-      'COMPARE WITH RESISTANCE LIMIT
-      if ((r_limit <> 0) and (r_limit <= resist)) then
+    'COMPARE WITH RESISTANCE LIMIT
+    if ((r_limit <> 0) and (r_limit <= resist)) then
 
-        'SET OUTPUT TO ZERO
-        P2_DAC(output_card, output_channel, DAC_ZERO)
-        voltage = DAC_ZERO
+      'SET OUTPUT TO ZERO
+      P2_DAC(output_card, output_channel, DAC_ZERO)
+      voltage = DAC_ZERO
 
-        'STOP SWEEP AND READOUT PROCESS
-        Stop_Process(2)
-        End
-      endif
-    
-      'SUBSAMPLE
-      if (subsampling_counter < subsampling_samples) then
-        Inc subsampling_counter
-      else
-        subsampling_counter = 1
-        'SEND DATAPOINT TO FIFO (27cycles per FIFO with no sweep)
-        fifo_raw = sweep_in
-      endif
+      'STOP SWEEP AND READOUT PROCESS
+      Stop_Process(2)
+      End
     endif
+    
+    'SUBSAMPLE
+    if (subsampling_counter < subsampling_samples) then
+      Inc subsampling_counter
+    else
+      subsampling_counter = 1
+      'SEND DATAPOINT TO FIFO (27cycles per FIFO with no sweep)
+      fifo_raw = sweep_in
+    endif
+  endif
 
 finish:
   'SEND LAST INPUT TO FIFO (no subsampling!)

@@ -73,6 +73,7 @@ FIFO_LEN = 1000003     # Hard coded: Length of data transmittion FIFOS
 INS = {'raw': 1}       # Data_3: (float) Raw input signal data FIFO
 INPUT_CARD = 2
 INPUT_CHANNEL = 8
+EMERGENCY_STOP = 12    # Command: (Par) Stop electromigration immediately (=1)
 
 #HARD CODED IN SWEEP PROCESS
 VERSION_PROCESS_2 = 2  # Read: (Par)  Version of sweep process
@@ -160,7 +161,7 @@ class adwin_electromigration(Instrument):
 ########################################################################
 
     def init_electromigration(self, sample_rate, sweep_rate, report_voltage=0,
-                              max_voltage=10, r_limit=0, gatesweep=False):
+                              max_voltage=10, r_limit=0, gatesweep=False, duration=10):
         ''' Initialize a electromigration process. '''
         # stop old electromigration process if still running
         if self._state == 'electromigration_ready':
@@ -179,6 +180,7 @@ class adwin_electromigration(Instrument):
         if gatesweep:
             gate_scale = 0.5 * self.aio.get_scale(name="vd") / self.aio.get_scale(name="vg")
             self.adw.Set_FPar(GATE_SCALE, gate_scale)
+            self.adw.Set_Par(GATE_DURATION, duration)
         else:
             self.adw.Set_FPar(GATE_SCALE, 0)
         self.set_r_limit(r_limit)
@@ -198,8 +200,9 @@ class adwin_electromigration(Instrument):
     def stop_electromigration(self):
         """ Stops the electromigration process. No signal is applied and no
             readout is triggered by a sweep anymore. """
-        self._check_measurement_active()
         log.info('Adwin stopping electromigration')
+        self.adw.Set_Par(EMERGENCY_STOP, 1)
+        self.adw.Stop_Process(SWEEP_PROCESS_NO)
         self.adw.Stop_Process(READOUT_PROCESS_NO)
         self._state = 'processes_loaded'
 
@@ -272,7 +275,6 @@ class adwin_electromigration(Instrument):
     def _start_electromigration(self, delay=0.05):
         # start electromigration process
         log.info('Adwin starting electromigration.')
-        self.adw.Set_Par(SWEEP_ACTIVE, 1)
         # initialize process
         self.adw.Start_Process(SWEEP_PROCESS_NO)
         # start process after small delay to wait for init to finish
