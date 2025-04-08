@@ -131,17 +131,13 @@ class Sequential_multiplexer:
         datasets : list(qkit.measure.measurement_base.MeasureBase.Data)
         """
         datasets = []
-        # print(coords)
         for name, measurement in self.registered_measurements.items():
-            # print(name, measurement)
             if measurement["active"]:
                 for node, unit in measurement["nodes"].items():
-                    # print(node,unit)
                     datasets.append(mb.MeasureBase.Data(name = f"{name}.{node}",
                                               coords = coords,
                                               unit = unit,
                                               save_timestamp = False))
-        # print(datasets)
         assert datasets, f"{__name__}: Tried to initialize an empty measurement dataset. Register and/or activate measurements."
         return datasets
     

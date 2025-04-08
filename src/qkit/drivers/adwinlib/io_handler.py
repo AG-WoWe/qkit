@@ -69,7 +69,7 @@ def bit2volt(val: int|float|ndarray|list, bits, vrange, absolute):
         case list():
             return [bit2volt(v, bits, vrange, absolute) for v in val]
         case ndarray():
-            return np.vectorize(bit2volt)(val, bits, vrange, absolute)
+            return np.vectorize(bit2volt, otypes=['float32'])(val, bits, vrange, absolute)
         case _:
             raise AdwinArgumentError
 

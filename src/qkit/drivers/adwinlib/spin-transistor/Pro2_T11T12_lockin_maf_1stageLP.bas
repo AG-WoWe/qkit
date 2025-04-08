@@ -155,7 +155,6 @@ sub init_lockin_filter()
   kappa = 1 - exp(-process_time / tao_lowpass)
   inph = 0
   quad = 0
-  Par_43 = kappa
 endsub
 sub apply_lockin_filter()
   'maf filter
@@ -236,7 +235,7 @@ event:
   quad_dem = lockin_in * 2 * lockin_ref90[lockin_idx] 'demodulated quadrature
   
   ' filter demodulated signal
-  apply_lockin_filter() 'inputs inph_dem,quad_dem outputs sf, cf
+  apply_lockin_filter() 'inputs: inph_dem, quad_dem | outputs: sf, cf
   
   ' TRANSMIT DATA TOPC [max 103 during cycles measurement, 11 cycles no measurement]
   if (meas_active = 0) then
