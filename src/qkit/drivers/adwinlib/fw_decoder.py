@@ -21,6 +21,8 @@ FIRMWARE_CODE = {'0': 'NANOQT',
                  '2': 'ELECTROMIGRATION'}
 ST_PROCESS_CODE = {'1': 'LOCKIN',
                    '2': 'SWEEP'}
+EM_PROCESS_CODE = {'1': 'READOUT',
+                   '2': 'SWEEP'}
 
 def firmware_int32_to_string(fw_int32):
     """ Split 32bit integer firnware code read from the Adwin Par_1 or
