@@ -268,7 +268,22 @@ class AdwinIO():
         for key, val in self._ports.items():
             if val['card'] == card and val['channel'] == channel:
                 return key
+        log.critical('Adwin: Output/Input not known.')
         return None
+
+    def get_scale(self, name:str=None, card:int=None, channel:int=None):
+        ''' Return scale of the channel '''
+        if name is None:
+            if card is not None and channel is not None:
+                name = self.get_name(card, channel)
+        return self._ports[name]['scale']
+
+    def get_bits(self, name:str=None, card:int=None, channel:int=None):
+        ''' Return bits of the channel '''
+        if name is None:
+            if card is not None and channel is not None:
+                name = self.get_name(card, channel)
+        return self._ports[name]['bits']
 
     def list_connected_outputs(self):
         ''' List names of connected outputs of the ADwin '''
