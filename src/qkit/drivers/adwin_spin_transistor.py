@@ -382,7 +382,7 @@ class adwin_spin_transistor(Instrument):
         ''' Return duration of the next sweep '''
         return self.adw.Get_FPar(REPORT_DURATION)
 
-    def is_lockin_active(self) -> int: 
+    def is_lockin_active(self) -> int:
         ''' Return 1 if lockin is active, 0 otherwise '''
         return self.adw.Get_Par(LOCKIN_ACTIVE)
 
@@ -438,7 +438,7 @@ class adwin_spin_transistor(Instrument):
             # Get ADbasic Par No. of output 'key' defined by convention
             card, channel = self.aio.get_card_channel(name)
             par_no = self._get_output_par(card, channel)
-            # Set ADbasic Par of for the output                        
+            # Set ADbasic Par of for the output
             self.adw.Set_Par(par_no, int(val))
 
     def _start_sweep(self, target, duration, delay=0.05):
@@ -497,13 +497,20 @@ class adwin_spin_transistor(Instrument):
         # before boot try to read the current outputs, which can
         # fail if the adwin was power cycled and never booted since
         firmware, version = self._read_adwin_firmware()
-        # Initialize output_buffer to 0V for all outputs
+        # Initialize output_buffer to 0V for all outputs as bits
         output_buffer = self.aio.output_zero_dict()
         # Depending on detected firmware read the current outputs
         if firmware == 'SPIN-TRANSISTOR':
             output_buffer.update(self.read_outputs(out_format='bit'))
             output_values = self.read_outputs(out_format='qty')
-            msg = ('Adwin: Current firrmware: Spin-Transistor: '
+            msg = ('Adwin: Current firmware: Spin-Transistor: '
+                 + f'{version}. Current outputs are {output_values}')
+            log.warning(msg)
+            log.warning(self.read_outputs(out_format='bit'))
+        elif firmware == 'ELECTROMIGRATION':
+            output_buffer.update(self.read_outputs(out_format='bit'))
+            output_values = self.read_outputs(out_format='qty')
+            msg = ('Adwin: Current firmware: Electromigration: '
                  + f'{version}. Current outputs are {output_values}')
             log.warning(msg)
             log.warning(self.read_outputs(out_format='bit'))
@@ -516,7 +523,7 @@ class adwin_spin_transistor(Instrument):
             log.warning(msg)
         elif firmware is None or firmware == 'unknown':
             msg = ('Adwin: Current firmware: unknown. Setting output '
-                + 'buffer to zero! If uutputs are not zero, recover '
+                + 'buffer to zero! If outputs are not zero, recover '
                 + 'them by setting the ouput buffer manually using '
                 + 'set_output_buffer() BEFORE FIRST SWEEP OR '
                 + 'INIT_MEASUREMENT!')
