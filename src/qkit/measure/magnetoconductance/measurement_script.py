@@ -305,6 +305,16 @@ class MeasurementScript():
             )
         time.sleep(0.1)
 
+    def correct_len(self, trace, samples):
+        N = len(trace)
+        if N > samples:
+            return trace[:samples]
+        if N == samples:
+            return trace
+        if N < samples:
+            diff = samples - N
+            return np.append(trace, [trace[-1]] * diff)
+
     def sweep_measure(self):
         ''' measure sweep and generate data dict'''
         trace, retrace = None, None
@@ -323,11 +333,11 @@ class MeasurementScript():
         # first handle all the direct inputs
         for meas, traces in self._temp.items():
             if meas in self.valids['inputs']:
-                tr = trace[meas][:samples]
+                tr = self.correct_len(trace[meas], samples)
                 rt = None
                 diff = None
                 if retrace:
-                    rt = np.flip(retrace[meas][:samples])
+                    rt = np.flip(self.correct_len(retrace[meas], samples))
                 if 'difference' in traces:
                     if all(isinstance(i, np.ndarray) for i in [tr, rt]):
                         diff = rt - tr
