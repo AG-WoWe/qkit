@@ -69,6 +69,9 @@ from qkit.drivers.adwinlib.nanoqt_tools import read_nanoqt_outputs
 # hardware. Therefore the real values can be read out after starting
 # the process
 
+#NANOQT SETTINGS
+NANOQT_OUT_CARD = 3
+
 # HARD CODED IN SWEEP AND LOCKIN PROCESS
 PROCESS_TIME = 2e-6
 LOCKIN_ACTIVE = 3      # Reports: "1" if lockin process is active
@@ -512,7 +515,8 @@ class adwin_spin_transistor(Instrument):
             log.warning(msg)
             log.warning(self.read_outputs(out_format='bit'))
         elif firmware == 'NANOQT':
-            output_buffer = read_nanoqt_outputs(self.adw)
+            output_buffer = read_nanoqt_outputs(self.adw, self.aio,
+                                                output_card=NANOQT_OUT_CARD)
             msg = (f'Adwin: Current firmware: NanoQt: {version}. The '
                     + 'current outputs have been recovered to ensure a '
                     + 'nice ride with Spin-Transistor firmware.')
