@@ -96,7 +96,7 @@ INS = { 'inph': 1,     # Data_1: (float) Inphase data FIFO
 LOCKIN_CARD = 3        # Hard coded: DAC card for lockin output
 LOCKIN_CHANNEL = 8     # Hard coded: DAC channel for lockin output
 LOCKIN_LEN = 8003      # Hard coded: Length of lockin signal arrays
-MAF_ARRAY_LEN = 40100
+MAF_ARRAY_LEN = 100100
 
 
 #HARD CODED IN SWEEP PROCESS
