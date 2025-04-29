@@ -95,8 +95,8 @@ class MeasurementScript():
             'inputs': {'raw', 'inph', 'quad'},
             'calc': {'amp': ['inph', 'quad'], 'phase': ['inph', 'quad']},
             'calc_func': {'amp': calc_r, 'phase': calc_theta},
-            'maxrate': {'bx': 0.1, 'by': 0.1, 'bz': 0.1, 'bp': 0.1,
-                        'bt': 0.1, 'vg': 0.1, 'vd': 0.1},
+            'maxrate': {'bx': 0.3, 'by': 0.3, 'bz': 0.3, 'bp': 0.3,
+                        'bt': 0.1, 'vg': 0.05, 'vd': 0.01},
             'unit': {'inph': 'S', 'quad': 'S', 'raw': 'I', 'amp': 'S',
                      'phase': 'rad'}}
 
