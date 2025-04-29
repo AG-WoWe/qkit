@@ -224,7 +224,7 @@ event:
   apply_lockin_filter() 'inputs inph_dem,quad_dem outputs sf, cf
   
   ' TRANSMIT DATA TOPC [max 103 during cycles measurement, 11 cycles no measurement]
-  if (meas_active = 0) then
+  if (measure_active = 0) then
     'don't save data (faster this way, because else is processed faster than if)
   else
     'SUBSAMPLE
