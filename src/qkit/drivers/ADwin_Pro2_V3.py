@@ -778,7 +778,7 @@ class ADwin_Pro2_V3(Instrument):
                 limit_error_Data = list(self.adw.GetData_Long(192,1,self.get_number_of_gates()))
                 #print("limit error Data: ", str(limit_error_Data))
                 if 1 in limit_error_Data:
-                    print(limit_error_Data)
+                    # print(limit_error_Data)
                     logging.warning(__name__+': voltage limit exceeded or individual voltage limit not set on channels. ')
                     #set limit error variable back to 0
                     self.adw.SetData_Long([0]*self.get_number_of_gates(), 192, 1, self.get_number_of_gates())
@@ -995,7 +995,7 @@ class ADwin_Pro2_V3(Instrument):
                 limit_error_Data = list(self.adw.GetData_Long(192,1,self.get_number_of_gates()))
                 #print("limit error Data: ", str(limit_error_Data))
                 if 1 in limit_error_Data:
-                    print(limit_error_Data)
+                    # print(limit_error_Data)
                     logging.warning(__name__+': voltage limit exceeded or individual voltage limit not set on channels. ')
                     #set limit error variable back to 0
                     self.adw.SetData_Long([0]*self.get_number_of_gates(), 192, 1, self.get_number_of_gates())
@@ -1704,43 +1704,43 @@ class ADwin_Pro2_V3(Instrument):
         The ADbasic file uses a memory that is split in 4 segments to make sure that the writing of the ADC card to the ADwin 
         memory does not conflict with the PC readout of the ADwin memory. 
         """
-        print('Start')
-        print('max samples continuous: ', self.max_samples_continuous)
+        # print('Start')
+        # print('max samples continuous: ', self.max_samples_continuous)
         segment_size = self.max_samples_continuous / 4 # full data aquisition split in 4 segments by ADbasic file
-        print('segment_size: ', segment_size)
+        # print('segment_size: ', segment_size)
         logging.info(__name__ + ': reading data from ADwin')
         old_index = self.index_continuous_readout 
-        print('old index: ', old_index)
+        # print('old index: ', old_index)
         self.index_continuous_readout = int((self.get_Par_7_global_long() - 1) * segment_size) # highest index to be transferred
-        print('index_continuous_read_out(1): ', self.index_continuous_readout)
+        # print('index_continuous_read_out(1): ', self.index_continuous_readout)
         if self.index_continuous_readout == 0: # no zero addressable in memory of ADwin Data_2
             self.index_continuous_readout = self.max_samples_continuous
-        print('index_continuous_read_out(2): ', self.index_continuous_readout)
+        # print('index_continuous_read_out(2): ', self.index_continuous_readout)
         #print("Index: ", self.index_continuous_readout)
         count_new_samples = self.index_continuous_readout - old_index
         #print("count_samples: ", count_new_samples)
-        print('count_new_samples: ', count_new_samples)
+        # print('count_new_samples: ', count_new_samples)
         data_volts = {}
         data_volts["voltage"] = []
         if count_new_samples>0:
             data_bits = np.array(self.adw.GetData_Long(2, (old_index + 1), count_new_samples))
-            print('data_bits: ', data_bits)
+            # print('data_bits: ', data_bits)
             data_volts["voltage"] = (data_bits * 2*10/(2**16) - 10)
         elif count_new_samples<0:
             if old_index is self.max_samples_continuous:
                 data_bits = np.array(self.adw.GetData_Long(2, 1, int(self.index_continuous_readout)))
-                print('data_bits: ', data_bits)
+                # print('data_bits: ', data_bits)
                 data_volts["voltage"] = (data_bits * 2*10/(2**16) - 10)
             else:
                 data_bits_1 = np.array(self.adw.GetData_Long(2, (old_index + 1), int(self.max_samples_continuous - old_index)))
-                print('data_bits_1: ', data_bits_1)
+                # print('data_bits_1: ', data_bits_1)
                 data_bits_2 = np.array(self.adw.GetData_Long(2, 1, int(self.index_continuous_readout)))
-                print('data_bits_2: ', data_bits_2)
+                # print('data_bits_2: ', data_bits_2)
                 data_volts["voltage"] = (np.append(data_bits_1, data_bits_2) * 2*10/(2**16) - 10)            
         #elif count_new_samples == 0:
            #print("checked")
-        print('stop')
-        print('data_volts: ', data_volts)
+        # print('stop')
+        # print('data_volts: ', data_volts)
         return data_volts
 
 
@@ -2007,12 +2007,12 @@ if __name__ == "__main__":
             plt.show()
 
     #triggered readout:
-    print(bill.set_input1_measurement_count_triggered_readout(10))
-    print(bill.get_input1_measurement_count_triggered_readout())
-    print(bill.set_input1_sample_count_triggered_readout(80))
-    print(bill.get_input1_sample_count_triggered_readout())
-    print(bill.set_input1_repeats_triggered_readout(5))
-    print(bill.get_input1_repeats_triggered_readout())
+    # print(bill.set_input1_measurement_count_triggered_readout(10))
+    # print(bill.get_input1_measurement_count_triggered_readout())
+    # print(bill.set_input1_sample_count_triggered_readout(80))
+    # print(bill.get_input1_sample_count_triggered_readout())
+    # print(bill.set_input1_repeats_triggered_readout(5))
+    # print(bill.get_input1_repeats_triggered_readout())
     bill.initialize_triggered_readout(process_number_triggered=2,
                                       process_path_triggered='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_V3.TC2',
                                       process_number_aquisition=3,
@@ -2021,7 +2021,7 @@ if __name__ == "__main__":
     bill.start_triggered_readout()
     bill.check_finished_triggered_readout()
     bill.check_error_triggered_readout()
-    print(bill.read_triggered_readout())
+    # print(bill.read_triggered_readout())
     bill.stop_triggered_readout()
     
     """
