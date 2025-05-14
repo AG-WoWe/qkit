@@ -31,6 +31,7 @@ try:
     from IPython.display import display
     class Progress_Bar(object):
         def __init__(self,max_it,name= 'Progress:',est_cycle_time=None,dummy=False):
+            print("THIS IS THE RIGHT FILE")
             if debug:
                 print("new style progress bar")
             self._dummy=dummy
@@ -93,10 +94,13 @@ try:
             self.progr = iteration
             self._update(param)
         
-        def iterate(self, param="", addend=1):
+        def iterate(self, addend=1, param=""):
+            print("check iterate")
+            print("addend: ", addend)
             if self._dummy:
                 return
             self.progr += addend
+            print("self.progr: ", self.progr)
             self._update(param)
         
         def _update(self,param=""):
@@ -185,10 +189,10 @@ except ImportError as e:
             self.starttime = time.time()
             self.start_eta_time = time.time()
 
-        def iterate(self,param=""):
+        def iterate(self,addend=1,param=""):
             if self._dummy:
                 return
-            self.progr += 1
+            self.progr += addend
             self._update(param)
             
         def _update(self,param=""):

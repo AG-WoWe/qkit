@@ -30,7 +30,8 @@ def derive_breadcrumb_filename() -> Path:
     """
     import uuid
     node = uuid.getnode()
-    filename = f".{node:x}{FILE_END}"
+    pid = os.getpid()  # Process ID is unique per notebook kernel
+    filename = f".{node:x}_{pid}{FILE_END}"
     return Path(qkit.cfg['datadir']) / filename
 
 class BreadCrumbCreator():

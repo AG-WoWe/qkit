@@ -284,7 +284,7 @@ class Tuning(mb.MeasureBase):
         self._open_qviewkit()
         
         a = self._data_file.add_view("Hysteresis", x = self._datasets["Chain.a"], y = self._datasets["Block.1"])
-        print(a)
+        # print(a)
         
         #circ_view_amp = self._hf.add_view('circ_amp', x=self._y_co, y=self._ds_amp) # dein erstes x und y datenset
         #circ_view_amp.add(x=self._frequency_co, y=self._circ_amp_gen) # hier kannst du weitere datensets adden (auch später noch) 
@@ -312,11 +312,13 @@ class Tuning(mb.MeasureBase):
                 self._x_parameter.set_function(x_val)
                 qkit.flow.sleep(self._x_parameter.wait_time)
                 latest_data = self.multiplexer.measure()
-                
+                # print("[measure1D] latest_data: ", latest_data)
+                # print("self._datasets: ", self._datasets)
                 self._append_value(latest_data, self._datasets)
-                
-                pb.iterate(addend = len(latest_data))
-                
+                # print("Using iterate from:", pb.__class__, pb.iterate.__code__)
+                pb.iterate(addend=len(latest_data))
+                # pb.iterate()
+                # pb.progr += len(latest_data)
                 if self.watchdog.stop:
                     warn(f"{__name__}: {self.watchdog.message}")
                     break
@@ -428,5 +430,5 @@ class Tuning(mb.MeasureBase):
             
 if __name__ == "__main__":
     tuning = Tuning()
-    print(tuning.measurement_limit)
-    print(tuning.report_static_voltages)
+    # print(tuning.measurement_limit)
+    # print(tuning.report_static_voltages)

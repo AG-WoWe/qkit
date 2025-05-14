@@ -57,6 +57,13 @@ class Sequential_multiplexer:
         -------
         None
         """
+        # print('register_measurement -> trace_data_function: ', get_tracedata_func)
+        # print('register_measurement -> type: ', type(get_tracedata_func))
+        # print('register_measurements -> name: ', name)
+        # print('register_measurement -> nodes: ', nodes)
+        # print(f"[register] args: {args}, kwargs: {kwargs}")
+        # print(f"[register] calling test: {get_tracedata_func(*args, **kwargs)}")    
+
         if type(name) != str:
             raise TypeError(f"{__name__}: {name} is not a valid experiment name. The experiment name must be a string.")        
         if type(nodes) != dict:
@@ -72,7 +79,7 @@ class Sequential_multiplexer:
         
         self.registered_measurements[name] = {"nodes" : nodes, "get_tracedata_func" : lambda: get_tracedata_func(*args, **kwargs), "active" : False}
         self.no_measurements = len(self.registered_measurements)
-    
+
     def activate_measurement(self, name):
         """
         Activates the given measurement.
@@ -132,13 +139,25 @@ class Sequential_multiplexer:
         """
         datasets = []
         for name, measurement in self.registered_measurements.items():
+            # print('name: ', name, 'measurement: ', measurement)
             if measurement["active"]:
+                # print('measurement is active')
                 for node, unit in measurement["nodes"].items():
                     datasets.append(mb.MeasureBase.Data(name = f"{name}.{node}",
                                               coords = coords,
                                               unit = unit,
                                               save_timestamp = False))
         assert datasets, f"{__name__}: Tried to initialize an empty measurement dataset. Register and/or activate measurements."
+        # print('dataset in multiplexer: ', datasets[0])
+        # print('dataset name: ', datasets[0].name)
+        # print('dataset coords name : ', datasets[0].coordinates[0].name)
+        # print('dataset coords unit: ', datasets[0].coordinates[0].unit)
+        # print('dataset coords values: ', datasets[0].coordinates[0].values)
+        # print('dataset coords length values: ', len(datasets[0].coordinates[0].values))
+        # print('dataset dim: ', datasets[0].dim)
+        # print('dataset unit: ', datasets[0].unit)
+        # print('dataset kwargs: ', datasets[0].kwargs)
+        # print('dataset data set: ', datasets[0].hdf_dataset)
         return datasets
     
     def measure(self):
@@ -151,8 +170,16 @@ class Sequential_multiplexer:
         """
         latest_data = {}
         for name, measurement in self.registered_measurements.items():
+            # print('measure function name: ', name)
+            # print('measure function measurement: ', measurement)
             if measurement["active"]:
+                # print('measure function: active')
+                # print(f"[measure] about to call get_tracedata_func: {measurement['get_tracedata_func']}")
                 temp = measurement["get_tracedata_func"]()
+                # print('measure function temp: ', temp)
                 for node, value in temp.items():
+                    # print('measure function node: ', node)
+                    # print('measure function value: ', value)
                     latest_data[f"{name}.{node}"] = value
+        # print('measure function latest data: ', latest_data)
         return latest_data

@@ -289,18 +289,23 @@ class Watching(mb.MeasureBase):
         assert self._x_parameter, f"{__name__}: Cannot start measure1D. x_parameters required."
         self._measurement_object.measurement_func = "%s: measure1D" % __name__
         dsets = self.multiplexer.prepare_measurement_datasets([self._x_parameter])
+        print('dset: ', dsets)
+        print('x_parameter: ', self._x_parameter)
         self._prepare_measurement_file(dsets)
         self.max_length = len(self._x_parameter.values)
         pb = Progress_Bar(self.max_length * self.multiplexer.no_active_nodes)
         
-        self._open_qviewkit(datasets = data_to_show)
-        
+        # self._open_qviewkit(datasets = data_to_show)
+    
         try:                
             while (not self._finished()):
                 latest_data = self.multiplexer.measure()
+                print('latest data: ', latest_data)
                 
-                for data_node, values in latest_data.items():       
+                for data_node, values in latest_data.items():
+                    print('data_node: ', data_node, 'values: ', values)       
                     checked_data = self._check_data(data_node, values)
+                    print('checked data: ', checked_data)
                     self._datasets[data_node].append(checked_data)
                     pb.iterate(addend = len(checked_data))
                 

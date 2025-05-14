@@ -8,5 +8,5 @@ y_calib = 0.056 #in Tesla/Amps
 z_calib = 0.060 #in Tesla/Amps
 
 x_max_current = 6.8 #10.32 # maximal current in Amps through coil x before quench
-y_max_current = 0.1 #5.0 # maximal current in Amps through coil y
-z_max_current = 0.1 #7.0 # maximal current in Amps through coil z
+y_max_current = 0 #5.0 # maximal current in Amps through coil y
+z_max_current = 0 #7.0 # maximal current in Amps through coil z

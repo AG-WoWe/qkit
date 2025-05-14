@@ -72,8 +72,19 @@ import time
 import numpy as np
 import sys
 import math
+import os
 #from scipy.signal import medfilt   # median filter for triggered readout averaging 
 
+################################################################################################
+# Find qkit source code in C dis:
+path = None
+for root, dirs, files in os.walk("C:/"):
+        if 'qkit' in dirs and os.path.abspath(os.path.join(root, 'qkit')).__contains__('src'):
+                 path = {'path to qkit source': os.path.abspath(os.path.join(root, 'qkit'))}
+
+if path is None:
+    raise TypeError('No source folder found on C:/ disk')
+###############################################################################################
 
 class ADwin_Pro2_V3(Instrument):
     """
@@ -130,18 +141,18 @@ class ADwin_Pro2_V3(Instrument):
     def __init__(self,
                  name='ADwin_Pro2_V3',
                  processnumber_main=1,
-                 processpath_main='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ramp_input_V3.TC1',
+                 processpath_main = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ramp_input_V3.TC1',
                  process_number_triggered=2,
-                 process_path_triggered='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_V3.TC2',
+                 process_path_triggered = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_V3.TC2',
                  process_number_aquisition=3,
-                 process_path_aquisition='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_Stopp_V3.TC3',
+                 process_path_aquisition = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_Stopp_V3.TC3',
                  process_number_continuous=4,
                  watch_sampling_f="10kHz",
-                 process_path_continuous_2kHz='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_2kHz_V3.TC4',
-                 process_path_continuous_10kHz='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_10kHz_V3.TC4',
-                 process_path_continuous_100kHz='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_100kHz_V3.TC4',
-                 process_path_continuous_1MHz='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_1MHz_V3.TC4',
-                 process_path_continuous_4MHz='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_4MHz_V3.TC4',
+                 process_path_continuous_2kHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_2kHz_V3.TC4',
+                 process_path_continuous_10kHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_10kHz_V3.TC4',
+                 process_path_continuous_100kHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_100kHz_V3.TC4',
+                 process_path_continuous_1MHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_1MHz_V3.TC4',
+                 process_path_continuous_4MHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_4MHz_V3.TC4',
                  devicenumber=1,
                  bootload=True,
                  global_lower_limit_in_V=0,
@@ -1669,7 +1680,7 @@ class ADwin_Pro2_V3(Instrument):
 
         else:
             logging.error(__name__ + ': Choose between "2kHz", "10kHz", "100kHz", "1MHz", or "4MHz"!')
-            raise Exception('Wrong frequency, hoose between "2kHz", "10kHz", "100kHz", "1MHz", or "4MHz"')
+            raise Exception('Wrong frequency, choose between "2kHz", "10kHz", "100kHz", "1MHz", or "4MHz"')
 
         self.index_continuous_readout = self.max_samples_continuous #reset to last data point in ADwin memory
         time.sleep(0.5) 
@@ -1693,31 +1704,43 @@ class ADwin_Pro2_V3(Instrument):
         The ADbasic file uses a memory that is split in 4 segments to make sure that the writing of the ADC card to the ADwin 
         memory does not conflict with the PC readout of the ADwin memory. 
         """
+        print('Start')
+        print('max samples continuous: ', self.max_samples_continuous)
         segment_size = self.max_samples_continuous / 4 # full data aquisition split in 4 segments by ADbasic file
+        print('segment_size: ', segment_size)
         logging.info(__name__ + ': reading data from ADwin')
         old_index = self.index_continuous_readout 
+        print('old index: ', old_index)
         self.index_continuous_readout = int((self.get_Par_7_global_long() - 1) * segment_size) # highest index to be transferred
+        print('index_continuous_read_out(1): ', self.index_continuous_readout)
         if self.index_continuous_readout == 0: # no zero addressable in memory of ADwin Data_2
             self.index_continuous_readout = self.max_samples_continuous
+        print('index_continuous_read_out(2): ', self.index_continuous_readout)
         #print("Index: ", self.index_continuous_readout)
         count_new_samples = self.index_continuous_readout - old_index
         #print("count_samples: ", count_new_samples)
+        print('count_new_samples: ', count_new_samples)
         data_volts = {}
         data_volts["voltage"] = []
         if count_new_samples>0:
             data_bits = np.array(self.adw.GetData_Long(2, (old_index + 1), count_new_samples))
+            print('data_bits: ', data_bits)
             data_volts["voltage"] = (data_bits * 2*10/(2**16) - 10)
         elif count_new_samples<0:
             if old_index is self.max_samples_continuous:
                 data_bits = np.array(self.adw.GetData_Long(2, 1, int(self.index_continuous_readout)))
+                print('data_bits: ', data_bits)
                 data_volts["voltage"] = (data_bits * 2*10/(2**16) - 10)
             else:
                 data_bits_1 = np.array(self.adw.GetData_Long(2, (old_index + 1), int(self.max_samples_continuous - old_index)))
+                print('data_bits_1: ', data_bits_1)
                 data_bits_2 = np.array(self.adw.GetData_Long(2, 1, int(self.index_continuous_readout)))
+                print('data_bits_2: ', data_bits_2)
                 data_volts["voltage"] = (np.append(data_bits_1, data_bits_2) * 2*10/(2**16) - 10)            
         #elif count_new_samples == 0:
            #print("checked")
-            
+        print('stop')
+        print('data_volts: ', data_volts)
         return data_volts
 
 

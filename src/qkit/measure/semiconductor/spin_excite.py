@@ -30,6 +30,8 @@ from qkit.measure.semiconductor.utils.utility_objects import Mapping_handler2
 
 import qupulse
 from qupulse._program._loop import to_waveform
+# from qupulse.waveforms.repetition import RepetitionWaveform
+# from qupulse.waveforms.sequence import SequenceWaveform
 
 import numpy as np
 import warnings
@@ -66,7 +68,9 @@ class Qupulse_decoder2:
     _for_type = qupulse.pulses.loop_pulse_template.ForLoopPulseTemplate
     _repetition_type = qupulse._program.waveforms.RepetitionWaveform
     _seq_type = qupulse._program.waveforms.SequenceWaveform
-    
+    # _repetition_type = qupulse.program.waveforms.RepetitionWaveform
+    # _seq_type = qupulse.program.waveforms.SequenceWaveform
+
     def __init__(self, *experiments, channel_sample_rates, measurement_sample_rates, deep_render = False, **kwargs):
         """Mir ist bekannt, wie Deutsche auf ein Rezept für ihr liebstes Haustier reagieren. 
         Ich „reiche“ dieses Rezept von einem Bekannten, der als Selbstständiger in Thailand lebt, 
