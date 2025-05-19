@@ -1,8 +1,110 @@
+import sys
 import matplotlib.pyplot as plt
 import numpy as np
-import sys
+from scipy.ndimage import gaussian_filter1d
+#from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
+from mpl_histcolorbar import HistColorbar, histcolorbar
 
 # plt.style.use('./plt_styles/default.mplstyle')
+
+def calc_diff(tr, rt):
+    diff = np.empty(tr.shape)
+    for i in range(tr.shape[0]):
+        diff[i] = tr[i, :] - rt[i, :]
+    return diff
+
+import numpy as np
+
+def find_range_by_percent_included(values, percent):
+    # Sort the values
+    sorted_values = np.sort(values)
+    
+    # Calculate the number of values to exclude from each side
+    num_values_to_exclude = int(len(sorted_values) * (100 - percent) / 200)
+    
+    # Find the range
+    lower_bound = sorted_values[num_values_to_exclude]
+    upper_bound = sorted_values[-num_values_to_exclude - 1]
+    
+    return lower_bound, upper_bound
+
+class PolarPlotter():
+    def __init__(self, sweep, step, data:np.ndarray, sample_rate, **kwargs):
+        self._sweep = sweep
+        self._step = step
+        self._data_raw = data
+        self.fs = sample_rate
+
+        self._data = self._data_raw
+
+        self.subsampled = False
+
+    def apply_filter(self, sigma):
+        ''' Apply gaussian filter to all sweeps '''
+        self._data = gaussian_filter1d(self._data_raw, sigma, axis=1)
+        self.subsampled = False
+
+    def apply_subsampling(self, subs_steps, subs_sweep):
+        ''' Subsample steps and sweep data '''
+        if self.subsampled is False:
+            self._step = self._step[::subs_steps]
+            self._sweep = self._sweep[::subs_sweep]
+            self._data = self._data[::subs_steps, ::subs_sweep]
+            self.subsampled = True
+        else:
+            print('Data is already subsampled. Apply filter first, or load again')
+
+    def plot_values_histogram(self):
+        # Create histogram of color values
+        fig_hist, ax_hist = plt.subplots()
+        color_values = self._data.flatten()
+        ax_hist.hist(color_values, bins=50)
+        ax_hist.set_title('Histogram of Color Values')
+        ax_hist.set_xlabel('Color Value')
+        ax_hist.set_ylabel('Frequency')
+
+    def test_plot(self, fc):
+        i = 10
+        fig, (ax1, ax2) = plt.subplots(2, sharex=True)
+        sweep = self._sweep
+        trace = self._data['trace'][i, :]
+        retrace = self._data['retrace'][i, :]
+        diff = self._data['trace'][i, :] - self._data['retrace'][i, :]
+        #yf = gaussian_filter1d(self._data['trace'], fc, axis=1)[i, :]
+        yf = gaussian_filter1d(trace, fc)
+        rf = gaussian_filter1d(retrace, fc)
+        df = gaussian_filter1d(diff, fc)
+        ax1.plot(sweep, trace)
+        ax1.plot(sweep, retrace)
+        ax1.plot(sweep, yf)
+        ax1.plot(sweep, rf)
+        ax2.plot(sweep, diff)
+        ax2.plot(sweep, df)
+        ax2.plot(sweep[::10], (yf - rf)[::10], linestyle='--')
+        #ax.plot(sweep[::10], yf[::10])
+
+    def polar_plot(self, crange=100, **kwargs):
+        #split in positive and negative part of sweep
+        zidx = np.abs(self._sweep).argmin()
+        # positive part of sweep
+        swp_pos = self._sweep[zidx:]
+        agl_pos = self._step * np.pi / 180
+        val_pos = self._data[:, zidx:].T
+        # negative part of sweep
+        agl_neg = agl_pos + np.pi
+        swp_neg = np.abs(self._sweep[:zidx])
+        val_neg = -1 * self._data[:, :zidx].T
+
+        vmin, vmax = find_range_by_percent_included(self._data.flatten(), crange)
+        print(vmin, vmax)
+        #plot posive and negative seperate
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+        ax.pcolormesh(agl_pos, swp_pos, val_pos, vmin=vmin, vmax=vmax, shading='nearest', **kwargs)
+        ax.pcolormesh(agl_neg, swp_neg, val_neg, vmin=vmin, vmax=vmax, shading='nearest', **kwargs)
+
+
+
+
 
 
 class HarryPlotter:
@@ -100,3 +202,5 @@ class HistogramPlotter(HarryPlotter):
         # find bins (middle of the range over which histogram counted)
         bins = edges[:-1] + np.mean(np.diff(edges)) / 2
         self.ax.bar(bins, counts, width=np.diff(edges), **settings)
+
+
