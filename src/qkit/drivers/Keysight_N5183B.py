@@ -20,10 +20,10 @@ from qkit.core.instrument_base import Instrument
 from qkit import visa
 import logging
 
-import keysight_ktrfsiggen
 import time
-import numpy as np              #For keysight_ktrfsiggen arrays
 from datetime import timedelta
+
+import pyvisa # use pyvisa for initialization
 
 class Keysight_N5183B(Instrument):
     '''
@@ -47,11 +47,8 @@ class Keysight_N5183B(Instrument):
         Instrument.__init__(self, name, tags=['physical'])
 
         self._address = 'TCPIP0::'+address+'::hislip0::INSTR'         
-        #idQuery = True                #Checks if instrument is supported by driver         
-        #reset   = reset               #reset instrument when driver is initialized
-        #options = "QueryInstrStatus=False, Simulate=True, Trace=False" 
-
-        self._instrument = keysight_ktrfsiggen.KtRfSigGen(self._address, True, reset, "QueryInstrStatus=False, Simulate=False, Trace=False" )      
+        self._rm = pyvisa.ResourceManager()
+        self._instrument = self._rm.open_resource(self._address)   
 
         # Implement parameters
         self.add_parameter('power',
@@ -63,12 +60,7 @@ class Keysight_N5183B(Instrument):
         self.add_parameter('status',
             flags=Instrument.FLAG_GETSET, type=bool)
         self.add_parameter('mode',
-            flags=Instrument.FLAG_GETSET, type=str)
-        self.add_parameter('delay',
-            flags=Instrument.FLAG_SET, type=float)
-        self.add_parameter('width',
-            flags=Instrument.FLAG_SET, type=float)
-        
+            flags=Instrument.FLAG_GETSET, type=str)       
         
 
         self.add_function('reset')
@@ -79,9 +71,6 @@ class Keysight_N5183B(Instrument):
             self.reset()
         else:
             self.get_all()
-
-        print('\n After reboot, pulse has to be set to triggered manually \n Pulse -> Pulse Source -> triggered')
-
     
     def reset(self):
         '''
@@ -125,7 +114,7 @@ class Keysight_N5183B(Instrument):
             ampl (float) : power in dBm
         '''
         logging.debug(__name__ + ' : get power')
-        return float(self._instrument.rf.level)
+        return float(self._instrument.query("POW?"))
 
     def do_set_power(self, amp):
         '''
@@ -138,7 +127,7 @@ class Keysight_N5183B(Instrument):
             None
         '''
         logging.debug(__name__ + ' : set power to %f' % amp)
-        self._instrument.rf.configure(frequency = self._instrument.rf.frequency, power_level = amp)
+        self._instrument.write(f"POW {amp}")
     
     # #def do_get_phase(self):
     # #    '''
@@ -177,7 +166,7 @@ class Keysight_N5183B(Instrument):
             freq (float) : Frequency in Hz
         '''
         logging.debug(__name__ + ' : get frequency')
-        return float(self._instrument.rf.frequency)
+        return float(self._instrument.query("FREQ?"))
 
     def do_set_frequency(self, freq):
         '''
@@ -190,7 +179,7 @@ class Keysight_N5183B(Instrument):
             None
         '''
         logging.debug(__name__ + ' : set frequency to %f' % freq)
-        self._instrument.rf.configure(frequency = freq, power_level = self._instrument.rf.level)
+        self._instrument.write(f"FREQ {freq}")
 
     def do_get_status(self):
         '''
@@ -203,7 +192,7 @@ class Keysight_N5183B(Instrument):
             status (string) : 'On' or 'Off'
         '''
         logging.debug(__name__ + ' : get status')
-        return self._instrument.rf.output_enabled
+        return self._instrument.query("OUTP?").strip() == "1"
 
 
     def do_set_status(self, status):
@@ -217,9 +206,11 @@ class Keysight_N5183B(Instrument):
             None
         '''
         logging.debug(__name__ + ' : set status to %s' % status)
-        
-        if type(status)==bool:
-            self._instrument.rf.output_enabled=status
+                
+        if status == True:
+            self.instrument.write("OUTP ON")
+        elif status == False:
+            self.instrument.write("OUTP OFF")
         else:
             raise ValueError('set_status(): can only set True or False')
         
@@ -227,7 +218,6 @@ class Keysight_N5183B(Instrument):
         '''
         Reads the mode of the pulse modulation
         'continuous'  sends a continuous signal 
-        'triggered'   sends a pulsed signal with a given delay and width
         'gated'       sends a signal whenever it is triggered 
 
         Input:
@@ -237,20 +227,21 @@ class Keysight_N5183B(Instrument):
             mode (string) : 'continuous','triggered' or 'gated'
         '''
         logging.debug(__name__ + ' : get mode')
-
-        if self._instrument.pulse_modulation.enabled==True:
-            if str(self._instrument.pulse_modulation.source)=='PulseModulationSource.INTERNAL':
-                return 'triggered'
-            else:
-                return 'gated'
+        
+        status = self._instrument.query(":PULM:STAT?").strip()
+        if status == '0':
+            return 'continuous'
+        
+        source = self._instrument.query(":PULM:SOUR?").strip().upper()
+        if source == 'EXT':
+            return 'gated'
         else:
-            return 'continuous' 
+            raise RuntimeError(f"get_mode(): Unexpected source '{source}'")
 
     def do_set_mode(self, mode):
         '''
         Mode for pulse modulation
         'continuous'  sends a continuous signal 
-        'triggered'   sends a pulsed signal with a given delay and width
         'gated'       sends a signal whenever it is triggered 
 
         Input:
@@ -261,44 +252,14 @@ class Keysight_N5183B(Instrument):
         '''
         logging.debug(__name__ + ' : set mode to %s' % mode)
 
-        if mode=='continuous':
-            self._instrument.pulse_modulation.enabled = False
-        elif mode=='triggered':
-            self._instrument.pulse_modulation.source=keysight_ktrfsiggen.PulseModulationSource(0)
-            time.sleep(1)   #device to slow
-            self._instrument.pulse_modulation.enabled = True
-        elif mode=='gated':
-            self._instrument.pulse_modulation.source=keysight_ktrfsiggen.PulseModulationSource(1)
-            time.sleep(1)   #device to slow
-            self._instrument.pulse_modulation.enabled = True
+        if mode == 'continuous':
+            self._instrument.write(":PULM:STAT OFF")  # Disable pulse modulation
+        elif mode == 'gated':
+            self._instrument.write(":PULM:SOUR EXT")   # Set source to external (gated)
+            time.sleep(1)
+            self._instrument.write(":PULM:STAT ON")
         else:
-            raise ValueError('set_mode(): can only set continuous, triggered or gated')
-    
-    def do_set_delay(self, delay):
-        '''
-        Set delay of the triggered mode
-
-        Input:
-            delay (float) : Time in seconds
-
-        Output:
-            None
-        '''
-        logging.debug(__name__ + ' : set delay to %f' % delay)
-        self._instrument.pulse_generator.configure_external_trigger(keysight_ktrfsiggen.PulseExternalTriggerSlope(0), delay)
-    
-    def do_set_width(self, width):
-        '''
-        Set pulse width of the triggered mode
-
-        Input:
-            width (float) : Time in seconds
-
-        Output:
-            None
-        '''
-        logging.debug(__name__ + ' : set delay to %f' % delay)
-        self._instrument.pulse_generator.width = timedelta(seconds=width)
+            raise ValueError("set_mode(): mode must be 'continuous' or 'gated'")
 
     ## shortcuts
     def off(self):
