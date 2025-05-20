@@ -217,6 +217,7 @@ class adwin_spin_transistor(Instrument):
         # sanity checks
         self._check_measurement_active()
         self._warn_if_fifo_to_small(duration)
+        log.info('Adwin starting about %.3f second measurement.', duration)
         # enable data aquisition
         self.adw.Set_Par(MEASURE_ACTIVE, 1)
         sleep(duration)
@@ -342,6 +343,8 @@ class adwin_spin_transistor(Instrument):
         log.info('Adwin starting lockin!')
         self.adw.Start_Process(LOCKIN_PROCESS_NO)
 
+        sleep(0.1)
+
         # get actual parameters
         sample_rate = self.adw.Get_FPar(REPORT_SAMPLE_RATE)
         self._sample_rate = sample_rate
@@ -457,7 +460,7 @@ class adwin_spin_transistor(Instrument):
                 target_bits.append(current_bits[name])
         self.adw.SetData_Long(target_bits, SWEEP_TARGET, 1,
                               len(target_bits))
-        log.info('Adwin starting %.1f second sweep.', duration)
+        log.info('Adwin starting %.3f second sweep.', duration)
         # initialize process
         self.adw.Start_Process(SWEEP_PROCESS_NO)
         # start process after small delay to wait for init to finish

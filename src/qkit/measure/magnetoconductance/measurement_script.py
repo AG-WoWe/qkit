@@ -80,6 +80,10 @@ def calc_theta(x, y):
     ''' calc func for phase shift from lockin'''
     return np.arctan2(y, x)
 
+def correct_lockin_by_amplitude(x, lockin_amplitude):
+    ''' just divide by amp or ist there a factor? check in adbasic script '''
+    pass
+
 class MeasurementScript():
     ''' The Measurement Script generates a 
     measurement routine with given params'''
@@ -89,14 +93,14 @@ class MeasurementScript():
 
         self.valids = {
             'step': {'vg', 'vd', 'N', 'bt', 'bp', 'phi', 'psi', 'theta'},
-            'sweep': {'vg', 'vd', 'bt', 'bp', 'phi', 'psi', 'theta'},
+            'sweep': {'vg', 'vd', 'bt', 'bp', 'phi', 'psi', 'theta', 'time'},
             'magnet': {'normal', 'sweep'},
             'traces': {'trace', 'retrace', 'difference'},
             'inputs': {'raw', 'inph', 'quad'},
             'calc': {'amp': ['inph', 'quad'], 'phase': ['inph', 'quad']},
             'calc_func': {'amp': calc_r, 'phase': calc_theta},
             'maxrate': {'bx': 0.3, 'by': 0.3, 'bz': 0.3, 'bp': 0.3,
-                        'bt': 0.1, 'vg': 0.05, 'vd': 0.01},
+                        'bt': 0.1, 'vg': 0.05, 'vd': 0.01, 'time': 1e6},
             'unit': {'inph': 'S', 'quad': 'S', 'raw': 'I', 'amp': 'S',
                      'phase': 'rad'}}
 
@@ -131,7 +135,7 @@ class MeasurementScript():
                        'unit': None, 'rate': None, 'duration': None,
                        'values':None, 'wait_time': None}
         self._step = {'name':None,'start':None,'stop':None,'unit':None,
-                        'step_size':None,'values':None}
+                        'step_size':None,'values':None, 'init_time': None}
         self._magnet = None
         self._volts = {'vd':None,'vg':None}
         self._lockin = {'freq': None, 'amp': None, 'tao': None,
@@ -209,8 +213,7 @@ class MeasurementScript():
         if self.dim == 1:
             self.tune.measure1D(self.plots)
         elif self.dim == 2:
-            self.tune.measure2D(self.plots,
-                                wait_time=self._sweep['wait_time'])
+            self.tune.measure2D(self.plots, wait_time=None)
         else:
             assert ModuleNotFoundError
 
@@ -285,11 +288,10 @@ class MeasurementScript():
         for key, val in self.wp_start.outs.items():
             duration = abs(val - outs_start[key]) / self.valids['maxrate'][key]
             sweep_time = max(sweep_time, duration)
-        if sweep_time > 0.001:
-            log.info(f"Sweeping to start point in {sweep_time:.1f}s!")
-            self.ramp_to_wp(dt=sweep_time)
-        else:
-            log.info("WP is already at startpoint.")
+        log.info(f"Sweeping to start point in {sweep_time:.1f}s!")
+        self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
+        if self._step['init_time']:
+            time.sleep(self._step['init_time'])
 
     def start_lockin(self):
         ''' start lockin signal'''
@@ -303,9 +305,14 @@ class MeasurementScript():
             tao=self._lockin['tao'],
             maf=self._lockin['maf']
             )
-        time.sleep(0.1)
+        if self._lockin['init_time']:
+            time.sleep(self._lockin['init_time'])
 
     def correct_len(self, trace, samples):
+        ''' If the length of a trace is not exactly what is expected, either
+            the redundant samples are removed, or the last sample is copied
+            until the trace is full. The discrepancy is usally +-2 samples and
+            therefore negligable '''
         N = len(trace)
         if N > samples:
             return trace[:samples]
@@ -318,14 +325,29 @@ class MeasurementScript():
     def sweep_measure(self):
         ''' measure sweep and generate data dict'''
         trace, retrace = None, None
+        # sleep for wait_time if set up
+        if self._sweep['wait_time']:
+            time.sleep(self._sweep['wait_time'])
+        # get sweep duration
+        sweep_duration = self._sweep['duration']
         # measure trace
-        trace = self.adwin.sweep_measure(
-            self.wp_stop.outs, duration=self._sweep['duration']
-        )
-        # measure retrace
+        if self._sweep['name'] == 'time':
+            trace = self.adwin.measure(duration=sweep_duration)
+        else:
+            trace = self.adwin.sweep_measure(self.wp_stop.outs,
+                                             duration=sweep_duration)
+        # measure retrace if set up
         if self._inputs['retrace']:
-            retrace = self.adwin.sweep_measure(
-                self.wp_start.outs,duration=self._sweep['duration']
+            # sleep for wait_time if set up
+            if self._sweep['wait_time']:
+                time.sleep(self._sweep['wait_time'])
+            # if sweep is over time call measure function
+            if self._sweep['name'] == 'time':
+                trace = self.adwin.measure(duration=sweep_duration)
+            # if sweep is variable call sweep_measure function
+            else:
+                retrace = self.adwin.sweep_measure(self.wp_start.outs,
+                                                   duration=sweep_duration
         )
         samples = len(self._sweep['values'])
         # temp contains inputs required to calcluate all save variables
@@ -433,10 +455,6 @@ class MeasurementScript():
         elif self._step['name'] in self.wp_stop.outs:
             self.wp_stop.set_wp(**kwargs)
 
-    def ramp_to_wp(self, dt):
-        ''' sweep to wp without measurement'''
-        self.adwin.sweep(self.wp_start.outs, duration=dt)
-
     def wp_setter(self, x=None, dt=None):
         ''' set new step val of step var for wp'''
         if self._inputs['retrace']:
@@ -455,7 +473,7 @@ class MeasurementScript():
         elif dt<min_duration:
             log.warning(f'Fixed ramp duration {dt}s is not safe, duration was set to minimal possible duration {min_duration}s!')
             dt = min_duration
-        self.ramp_to_wp(dt=dt)
+        self.adwin.sweep(self.wp_start.outs, duration=dt)
 
     def generate_steps(self):
         ''' generate steps for step variable if possible'''
@@ -477,37 +495,33 @@ class MeasurementScript():
 
     def generate_sweep(self):
         ''' generate steps for sweep variable if possible'''
-        # Validation of sweep rate/duration
-        if self._sweep['rate'] and (self._sweep['start'] is not None and self._sweep['stop'] is not None):
+        # check if start and stop values are given
+        if None in [self._sweep['start'], self._sweep['stop']]:
+            raise SettingsError
+        # if rate is given, calculate duration and check maxrate
+        if self._sweep['rate'] is not None:
             if self.valids['maxrate'][self._sweep['name']] < self._sweep['rate']:
-                log.warning(f"Rate of {self._sweep['rate']} is not valid! Set rate to max rate {self.valids['maxrate'][self._sweep['name']]}")
-                self._sweep['rate'] = self.valids['maxrate'][self._sweep['name']]
-            self._sweep['duration'] = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['rate']
-            log.info(f"Set sweep duration to {self._sweep['duration']}")
-        elif self._sweep['duration'] and (self._sweep['start'] is not None and self._sweep['stop'] is not None):
-            rate = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['duration']
+                log.warning("Sweep rate exceeds maximum!")
+                raise SettingsError
+            duration = abs(self._sweep['stop'] - self._sweep['start']) / self._sweep['rate']
+            self._sweep['duration'] = duration
+            log.info(f"Set sweep duration to {duration}")
+        # if duration is given check maxrate
+        elif self._sweep['duration'] is not None:
+            rate = abs(self._sweep['stop'] - self._sweep['start']) / self._sweep['duration']
             if self.valids['maxrate'][self._sweep['name']] < rate:
-                self._sweep['rate'] = self.valids['maxrate'][self._sweep['name']]
-                log.warning(f"Sweep duration {self._sweep['duration']} with rate {rate} is not valid! Set rate to max rate {self.valids['maxrate'][self._sweep['name']]}!")
-                self._sweep['duration'] = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['rate']
-            else:
-                self._sweep['rate'] = rate
-        elif None not in [self._sweep['start'], self._sweep['stop']]:
-            log.warning(f"No rate set! Set rate to max rate {self.valids['maxrate'][self._sweep['name']]}")
-            self._sweep['rate'] = self.valids['maxrate'][self._sweep['name']]
-            self._sweep['duration'] = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['rate']
-            log.info(f"Set sweep duration to {self._sweep['duration']}")
+                log.warning("Sweep rate exceeds maximum!")
+                raise SettingsError
         else:
-            assert ValueError("Values for sweep missing!")
+            raise SettingsError
+        # calculate sweep values array
+        samples = round(self._sweep['duration'] * self._lockin['sample_rate'])
+        self._sweep['values'] = np.linspace(self._sweep['start'],
+                                            self._sweep['stop'],
+                                            samples,
+                                            dtype=np.float32)
+        log.info("Generated sweep values!")
 
-        if None not in [self._sweep['start'], self._sweep['stop'], self._sweep['rate']]:
-            self._sweep['values'] = np.linspace(
-                self._sweep['start'], self._sweep['stop'],
-                round(self._sweep['duration'] * self._lockin['sample_rate']),
-                dtype=np.float32)
-            log.info("Generated sweep values!")
-        else:
-            log.error("Couldn't generate sweep value list, inputs missing!")
 
     def get_sph(self):
         ''' getter func for sph vars'''
@@ -620,7 +634,7 @@ class MeasurementScript():
 
     def set_step(self, **kwargs):
         ''' setter func for step'''
-        for key,val in kwargs.items():
+        for key, val in kwargs.items():
             if key in self._step:
                 match key:
                     case 'unit':
@@ -631,7 +645,7 @@ class MeasurementScript():
                             self._step[key] = val
                         else:
                             log.error(f'{val} is no valid value for step_{key}!')
-                    case 'start' | 'stop' | 'step_size':
+                    case 'start' | 'stop' | 'step_size' | 'init_time' | 'wait_time':
                         if isinstance(val,(int,float)):
                             self._step[key] = val
                         else:
@@ -646,7 +660,7 @@ class MeasurementScript():
 
     def set_volts(self, **kwargs):
         ''' setter func for volts'''
-        for key,val in kwargs.items():
+        for key, val in kwargs.items():
             if key in self._volts:
                 if isinstance(val,(int,float)):
                     self._volts[key] = val
