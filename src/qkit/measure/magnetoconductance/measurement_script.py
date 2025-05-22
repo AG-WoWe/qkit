@@ -289,6 +289,7 @@ class MeasurementScript():
             duration = abs(val - outs_start[key]) / self.valids['maxrate'][key]
             sweep_time = max(sweep_time, duration)
         log.info(f"Sweeping to start point in {sweep_time:.1f}s!")
+        print(self.wp_start.outs)
         self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
         if self._step['init_time']:
             time.sleep(self._step['init_time'])
@@ -497,7 +498,11 @@ class MeasurementScript():
         ''' generate steps for sweep variable if possible'''
         # check if start and stop values are given
         if None in [self._sweep['start'], self._sweep['stop']]:
-            raise SettingsError
+            if self._sweep['name'] == 'time':
+                self._sweep['start'] = 0
+                self._sweep['stop'] = self._sweep['duration']
+            else:
+                raise SettingsError
         # if rate is given, calculate duration and check maxrate
         if self._sweep['rate'] is not None:
             if self.valids['maxrate'][self._sweep['name']] < self._sweep['rate']:

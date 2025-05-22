@@ -55,6 +55,7 @@ import logging as log
 from pathlib import Path
 from time import sleep
 import ADwin as adw
+import numpy as np
 from qkit.core.instrument_base import Instrument
 from qkit.drivers.adwinlib.io_handler import AdwinIO, AdwinModeError
 from qkit.drivers.adwinlib.io_handler import AdwinLimitError
@@ -148,6 +149,7 @@ class adwin_spin_transistor(Instrument):
 
         self._state = 'init'
         self._sample_rate = None
+        self._lockin_amp = None
         self._inputs = []
 
         # Set 'bootload' to 'False' to not reboot the Adwin.
@@ -252,9 +254,15 @@ class adwin_spin_transistor(Instrument):
         for key in res:
             if key in self._inputs:
                 samples = self.adw.Fifo_Full(INS[key])
+                # Get input in bit values
                 tmp = self.adw.GetFifo_Float(INS[key], samples)
-                res[key] = self.aio.bit2qty(tmp, name='input',
-                                            absolute=False)
+                # Transform bit to physical quantity
+                qty = self.aio.bit2qty(tmp, name='input', absolute=False)
+                # if inph or quad component divide by amplitude to get dI/dV
+                if key in ['inph', 'quad']:
+                    res[key] = np.divide(qty, self._lockin_amp)
+                else:
+                    res[key] = qty
             else:
                 self.adw.Fifo_Clear(INS[key])
         return res
@@ -293,8 +301,9 @@ class adwin_spin_transistor(Instrument):
                     raise AdwinLimitError
                 self.adw.Set_FPar(FREQUENCY, freq)
                 # Set lockin amplitude after translating to bit value
-                amp = lockin_params['amplitude']
-                amp_bits = self.aio.qty2bit(amp, card=LOCKIN_CARD,
+                self._lockin_amp = lockin_params['amplitude']
+                amp_bits = self.aio.qty2bit(self._lockin_amp,
+                                            card=LOCKIN_CARD,
                                             channel=LOCKIN_CHANNEL,
                                             absolute=False)
                 self.adw.Set_Par(AMPLITUDE, amp_bits)
@@ -355,7 +364,7 @@ class adwin_spin_transistor(Instrument):
             freq = self.adw.Get_FPar(REPORT_FREQUENCY)
             log.warning('ADwin: lock-in: frequency = %s Hz. '
                         + 'amplitdue = %s V, tao = %s s, '
-                        + 'sample_rate = %s', freq, amp, tao,
+                        + 'sample_rate = %s', freq, self._lockin_amp, tao,
                         sample_rate)
         else:
             log.warning('ADwin dc measurement initialized with '
