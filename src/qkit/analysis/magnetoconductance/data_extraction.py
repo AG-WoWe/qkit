@@ -12,7 +12,8 @@ HDF_DATA_DIR = 'entry/data0'
 class MapSTExtractor:
     ''' Extract sweep, step and data from hdf file containg map from ST '''
     def __init__(self, fpath, mfunc='sweep_measure'):
-        self._h5data0 = h5py.File(fpath, mode='r')[HDF_DATA_DIR]
+        self._h5 = h5py.File(fpath, mode='r')
+        self._h5data0 = self._h5[HDF_DATA_DIR]
         self._mfunc = mfunc
 
     def list_mvars(self):
@@ -81,8 +82,8 @@ class MapSTExtractor:
     def get_measurement_config(self):
         ''' Return measurement settings '''
         # get the metadata from measurment.config dataset
-        settings_ds = self._h5data0['measurement.config']
-        metadata = self._get_metadata(settings_ds)
+        ds = self._h5data0['measurement.config']
+        metadata = self._get_metadata(ds)
         # repair the nested dictionary entries which are strings now
         for key, val in metadata.items():
             if key not in ['name']:
@@ -94,6 +95,10 @@ class MapSTExtractor:
                 val = literal_eval(val)
             metadata[key] = val
         return metadata
+
+    def get_dataset(self, name):
+        ''' Return dataset '''
+        return self._h5data0[name]
 
     def get_sample_rate(self):
         ''' Return sample_rate of measurement '''
@@ -133,6 +138,10 @@ class MapSTSaveFile(H5_file):
                                            data=data,
                                            )
         self._add_metadata_to_ds(dataset, metadata)
+
+    def write_existing_dataset_to_data0(self, dataset):
+        ''' Write a dataset object to data0 '''
+        self.hf.copy(dataset, self.hf[HDF_DATA_DIR])
 
     def write_metadata_ds(self, name, metadata:dict):
         ''' create a dataset holding metadata '''

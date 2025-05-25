@@ -29,7 +29,7 @@ def find_range_by_percent_included(values, percent):
     return lower_bound, upper_bound
 
 class PolarPlotter():
-    def __init__(self, sweep, step, data:np.ndarray, sample_rate, **kwargs):
+    def __init__(self, step, sweep, data:np.ndarray, sample_rate, **kwargs):
         self._sweep = sweep
         self._step = step
         self._data_raw = data

@@ -13,8 +13,8 @@ def slice_arrays_by_x_values(x, y, xlim:tuple=(None, None)):
     if len(x) == len(y) and None not in xlim:
         xmin = xlim[0]
         xmax = xlim[1]
-        ids = sorted((np.abs(x - xmin).argmin(), np.abs(x - xmax).argmin()))
-        return x[ids[0]: ids[1]], y[ids[0]: ids[1]]
+        idc = sorted((np.abs(x - xmin).argmin(), np.abs(x - xmax).argmin()))
+        return x[idc[0]: idc[1]], y[idc[0]: idc[1]]
     return x, y
 
 def filter_and_derive(y, filter_func=None, filter_val=None):
@@ -140,6 +140,8 @@ class JumpDetective:
     ''' The module takes an object of the HDFData class to extract measurement data
     from a .h/hdf5 file and detect jumps in the sweeps. The HDFData object
     can also be used to save the detected jumps in the .h/hdf5 file analysis0 group.'''
+    # TO DO: USE DATATREATMENT CLASS INSTEAD OF EXTERNAL FUNCTIONS TO AVOID
+    # APPLYING CHANGES ONLY TO ONE PART IN THE FUTURE??
     def __init__(self, step, sweep, data, **params):
         self._step = step
         self._sweep = sweep
@@ -279,20 +281,81 @@ class JumpDetective:
             ax.plot(jpos, jamp, linestyle='', marker='X', color='red')
         return ax
 
-    def plot_jpos_histogram(self, ax, dirns=None, indices:list=None, **kwargs):
+    def plot_jpos_histogram(self, ax, dirns=None, indices:list=None,
+                            steplim:tuple=None, **kwargs):
         ''' Plot histogram of jump positions '''
+        # check that only indices or steplim is given
+        if indices is not None and steplim is not None:
+            print('steplim and indices can not be used simultaneusly')
+            raise AssertionError
+        # if do directions are given, use all available ones
         if dirns is None:
             dirns = list(self._data.keys())
         for dirn in dirns:
+            # if steplim is given, calculate corresponding indicees
+            if steplim is not None:
+                istart = np.abs(self._step - steplim[0]).argmin()
+                istop = np.abs(self._step - steplim[1]).argmin()
+                indices = range(istart, istop)
+            # detect jumps
             jpos, _ = self.detect_jumps(dirn, indices)
             jpos = self.select_jumps(jpos, self._params['select'])
             bin_edges, _ = create_bin_edges(self._sweep)
             # if label is not given, use dirn as label
             if 'label' not in kwargs:
                 kwargs['label'] = dirn
-            ax.hist(jpos, bins = bin_edges, **kwargs)
+            ax.hist(jpos, bins=bin_edges, **kwargs)
         ax.legend()
         return ax
+
+    def plot_hist_no_jumps_p_step(self, ax, dirn=None, jdirns=None, **kwargs):
+        ''' Plot histogram of the total amount of jumps found in the trace for
+            each step '''
+        if self._params['detect'] != 'all':
+            print('Are you sure you dont want to detect all jumps???')
+        if self._params['select'] != 'all':
+            print('Are you sure you dont want to select all jumps???')
+        buffer = self._params['jdirns'][dirn]
+        jump_no = np.zeros(len(self._step))
+        for jdirn in jdirns:
+            self._params['jdirns'][dirn] = jdirn
+            jpos, _ = self.detect_jumps(dirn, indices=None)
+            for i, val in enumerate(jpos):
+                jump_no[i] += len(val) - np.count_nonzero(np.isnan(val))
+        self._params['jdirns'][dirn] = buffer
+        ax.bar(self._step, jump_no, width=np.mean(np.diff(self._step)))
+        #ax.hist(self._step, jump_no, **kwargs)
+        return ax
+
+    def dwell_time(self, ax, step_no, dirn=None, jdirns=None, **kwargs):
+        ''' Plot histogram of dwell time (distance between jumps) for a single
+            sweep at step_no '''
+        # change necessary settings
+        jdirns_buffer = self._params['jdirns'][dirn]
+        detect_buffer = self._params['detect']
+        select_buffer = self._params['select']
+        self._params['detect'] = 'all'
+        self._params['select'] = 'all'
+        # get all jumps
+        jp = {}
+        for jdirn in jdirns:
+            self._params['jdirns'][dirn] = jdirn
+            jpos, _ = self.detect_jumps(dirn, indices=None)
+            jp[jdirn] = jpos
+        jumps = [None] * len(self._step)
+        for i, _ in enumerate(jumps):
+            jumps[i] = []
+            for jdirn in jdirns:
+                jumps[i].extend(jp[jdirn][i])
+            jumps[i] = sorted(jumps[i])
+        #change cettings back
+        self._params['jdirns'][dirn] = jdirns_buffer
+        self._params['detect'] = detect_buffer
+        self._params['select'] = select_buffer
+        diff = np.diff(jpos[step_no])
+        ax.hist(diff, **kwargs)
+        return ax
+
 
     def plot_hist_both_jdirns_per_trace(self, ax, dirn, **kwargs):
         ''' Plot histogram with jump positions for up and down jumps for a
