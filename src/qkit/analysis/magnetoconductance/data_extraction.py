@@ -9,6 +9,9 @@ from qkit.storage.hdf_file import H5_file
 
 HDF_DATA_DIR = 'entry/data0'
 
+class DataIntegrityError(Exception):
+    pass
+
 class MapSTExtractor:
     ''' Extract sweep, step and data from hdf file containg map from ST '''
     def __init__(self, fpath, mfunc='sweep_measure'):
@@ -44,7 +47,19 @@ class MapSTExtractor:
         dataset = self._get_dataset('x')
         # get metadata
         metadata = self._get_metadata(dataset)
-        return np.array(dataset, dtype=dataset.attrs.get('dtype')), metadata
+        # check if steps are missing  (aborted or copied falie while running)
+        steps = np.array(dataset, dtype=dataset.attrs.get('dtype'))
+        # check number of steps in all measured datasets
+        mds = [val for key, val in self._h5data0.items() if self._mfunc in key]
+        no_steps = [ds.attrs.get('fill')[0] for ds in mds]
+        # error if not all measurements have the same amount of steps
+        if any(no_steps - no_steps[0]):
+            print('ERROR: Not all measurements have the same amount of steps.')
+            raise DataIntegrityError
+        # discard the steps which are not measured
+        if len(steps) != no_steps[0]:
+            steps = steps[:no_steps[0]]
+        return steps, metadata
 
     def get_sweep(self):
         ''' Get sweep array and metadata of the measurement '''
