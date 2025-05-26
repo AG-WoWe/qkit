@@ -19,7 +19,7 @@ class MapSTExtractor:
         self._h5data0 = self._h5[HDF_DATA_DIR]
         self._mfunc = mfunc
 
-    def list_mvars(self):
+    def list_mvars(self, echo:bool=True):
         ''' Returns and prints list of mvars in h5 file '''
         datasets = self._h5data0.keys()
         res = set()
@@ -27,10 +27,11 @@ class MapSTExtractor:
             if self._mfunc in ds:
                 res.add(ds.split('.')[1].split('_')[0])
         res = sorted(list(res))
-        print(f'Found measurement variables: {res}')
+        if echo:
+            print(f'Found measurement variables: {res}')
         return res
 
-    def list_dirns(self, mvar:str):
+    def list_dirns(self, mvar:str, echo:bool=True):
         ''' Returns and prints list of directions found for mvar in h5 file '''
         datasets = [key for key in self._h5data0.keys() if mvar in key]
         res = set()
@@ -38,7 +39,8 @@ class MapSTExtractor:
             if self._mfunc in ds:
                 res.add(ds.split('.')[1].split('_')[1])
         res = sorted(list(res))
-        print(f'Found directions for "{mvar}": {res}')
+        if echo:
+            print(f'Found directions for "{mvar}": {res}')
         return res
 
     def get_step(self):
@@ -87,7 +89,7 @@ class MapSTExtractor:
         metadata_dict = {mvar: {} for mvar in mvars}
         for mvar in data_dict:
             if dirns is None:
-                dirns = self.list_dirns(mvar)
+                dirns = self.list_dirns(mvar, echo=False)
             for dirn in dirns:
                 data, metadata = self.get_data(mvar, dirn)
                 data_dict[mvar][dirn] = data
