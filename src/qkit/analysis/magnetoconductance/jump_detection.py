@@ -290,7 +290,7 @@ class JumpDetective:
             raise AssertionError
         # if do directions are given, use all available ones
         if dirns is None:
-            dirns = list(self._data.keys())
+            dirns = sorted(list(self._data.keys()), reverse=True)
         for dirn in dirns:
             # if steplim is given, calculate corresponding indicees
             if steplim is not None:
@@ -301,10 +301,8 @@ class JumpDetective:
             jpos, _ = self.detect_jumps(dirn, indices)
             jpos = self.select_jumps(jpos, self._params['select'])
             bin_edges, _ = create_bin_edges(self._sweep)
-            # if label is not given, use dirn as label
-            if 'label' not in kwargs:
-                kwargs['label'] = dirn
-            ax.hist(jpos, bins=bin_edges, **kwargs)
+            # plot hist
+            ax.hist(jpos, bins=bin_edges, label=dirn, **kwargs)
         ax.legend()
         return ax
 
@@ -442,3 +440,6 @@ class JumpDetective:
             C[:, idx] = counts
         ax.pcolormesh(self._step, bin_mids, C)
         return ax
+
+    def plot_jamp_hist(self, ax, dirn=None):
+        pass
