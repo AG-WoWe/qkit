@@ -27,15 +27,15 @@ class MapSTExtractor:
         print(f'Found measurement variables: {res}')
         return res
 
-    def list_dirns(self):
-        ''' Returns and prints list of trace-directions in h5 file '''
-        datasets = self._h5data0.keys()
+    def list_dirns(self, mvar:str):
+        ''' Returns and prints list of directions found for mvar in h5 file '''
+        datasets = [key for key in self._h5data0.keys() if mvar in key]
         res = set()
         for ds in datasets:
             if self._mfunc in ds:
                 res.add(ds.split('.')[1].split('_')[1])
         res = sorted(list(res))
-        print(f'Found trace directions: {res}')
+        print(f'Found directions for "{mvar}": {res}')
         return res
 
     def get_step(self):
@@ -68,11 +68,11 @@ class MapSTExtractor:
             file. '''
         if mvars is None:
             mvars = self.list_mvars()
-        if dirns is None:
-            dirns = self.list_dirns()
         data_dict = {mvar: {} for mvar in mvars}
         metadata_dict = {mvar: {} for mvar in mvars}
         for mvar in data_dict:
+            if dirns is None:
+                dirns = self.list_dirns(mvar)
             for dirn in dirns:
                 data, metadata = self.get_data(mvar, dirn)
                 data_dict[mvar][dirn] = data
@@ -140,7 +140,7 @@ class MapSTSaveFile(H5_file):
         self._add_metadata_to_ds(dataset, metadata)
 
     def write_existing_dataset_to_data0(self, dataset):
-        ''' Write a dataset object to data0 '''
+        ''' Write a full dataset object to data0 '''
         self.hf.copy(dataset, self.hf[HDF_DATA_DIR])
 
     def write_metadata_ds(self, name, metadata:dict):
