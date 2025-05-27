@@ -90,7 +90,7 @@ class MapSTExtractor:
             mvars and dirns. If None specified for all mvars, dirns found in
             file. '''
         if mvars is None:
-            mvars = self.list_mvars()
+            mvars = self.list_mvars(echo=False)
         data_dict = {mvar: {} for mvar in mvars}
         metadata_dict = {mvar: {} for mvar in mvars}
         for mvar in data_dict:
