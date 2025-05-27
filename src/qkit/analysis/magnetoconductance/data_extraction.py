@@ -10,6 +10,8 @@ from qkit.storage.hdf_file import H5_file
 HDF_DATA_DIR = 'entry/data0'
 
 class DataIntegrityError(Exception):
+    ''' Error to raise, when the h5file has unexpected format or unmatching
+        sized of datasets '''
     pass
 
 class MapSTExtractor:
@@ -18,6 +20,10 @@ class MapSTExtractor:
         self._h5 = h5py.File(fpath, mode='r')
         self._h5data0 = self._h5[HDF_DATA_DIR]
         self._mfunc = mfunc
+
+        mvars = self.list_mvars()
+        for mv in mvars:
+            self.list_dirns(mv)
 
     def list_mvars(self, echo:bool=True):
         ''' Returns and prints list of mvars in h5 file '''
