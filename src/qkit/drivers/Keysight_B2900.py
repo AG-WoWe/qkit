@@ -22,6 +22,7 @@ from qkit import visa
 import numpy as np
 import time
 import logging
+import random # important
 
 
 class Keysight_B2900(Instrument):
@@ -357,6 +358,7 @@ class Keysight_B2900(Instrument):
         else:
             self.get_all()
         self._write(':syst:beep:stat 0')  # disable beeper
+        self._write(":DISP:CSET {:d}".format(random.randint(1, 2))) # important
 
     def _write(self, cmd):
         """
@@ -489,30 +491,6 @@ class Keysight_B2900(Instrument):
             logging.error('{!s}: Cannot get the digital output of pin {!s}'.format(__name__, channel))
             raise type(e)('{!s}: Cannot get the digital output of pin {!s}\n{!s}'.format(__name__, channel, e))
 
-    def set_measurement_mode(self, mode, channel=1):
-        """
-        Sets measurement mode (wiring system) of channel <channel> to <mode>.
-
-        Parameters
-        ----------
-        mode: int
-            State of the measurement sense mode. Must be 0 (2-wire) or 1 (4-wire).
-        channel: int
-            Number of channel of interest. Must be 1 for SMUs with only one channel and 1 or 2 for SMUs with two channels. Default is 1.
-
-        Returns
-        -------
-        None
-        """
-        # Corresponding Command: :SENSe[c]:REMote 1|0|ON|OFF
-        try:
-            logging.debug('{!s}: Set measurement mode{:s} to {:d}'.format(__name__, self._log_chans[self._channels][channel], mode))
-            self._write(':sens{:s}:rem {:d}'.format(self._cmd_chans[self._channels][channel], mode))
-        except Exception as e:
-            logging.error('{!s}: Cannot set measurement mode{:s} to {!s}'.format(__name__, self._log_chans[self._channels][ channel], mode))
-            raise type(e)('{!s}: Cannot set measurement mode{:s} to {!s}\n{!s}'.format(__name__, self._log_chans[self._channels][ channel], mode, e))
-        return
-
     def set_sync(self, status):
         """
         Sets the interchannel synchronization to <val>.
@@ -559,6 +537,78 @@ class Keysight_B2900(Instrument):
         except Exception as e:
             logging.error('{!s}: Cannot get interchannel synchronization'.format(__name__))
             raise type(e)('{!s}: Cannot get interchannel synchronization\n{!s}'.format(__name__, e))
+
+    def set_low_terminal_state(self, mode, channel=1):
+        """
+        Sets a channel's low terminal to either grounded or floating. Output needs to be off for this command, else an error is raised.
+
+        Parameters
+        ----------
+        mode: int
+            low terminal state. grounded (mode=0) or floating (mode=1)
+        channel: int
+            Number of channel of interest. Must be 1 for SMUs with only one channel and 1 or 2 for SMUs with two channels. Default is 1.
+
+        Returns
+        -------
+        None
+        """
+
+        # related command :OUTPut[c]:LOW GRO|FLO
+        try:
+            logging.debug('{!s}: Set low terminal state of channel {:s} to {:s}'.format(__name__, self._log_chans[self._channels][channel], ["grounded", "floating"][mode]))
+            self._write(":outp{!s}:low {:s}".format(self._cmd_chans[self._channels][channel], ["gro", "flo"][mode]))
+        except Exception as e:
+            logging.error('{!s}: Cannot set low terminal state. Is output off?'.format(__name__))
+            raise type(e)('{!s}: Cannot set low terminal state. Is output off?\n{!s}'.format(__name__, e))
+        
+    def get_low_terminal_state(self, channel=1):
+        """
+        Sets a channel's low terminal to either grounded or floating. Output needs to be off for this command, else an error is raised.
+
+        Parameters
+        ----------
+        mode: int
+            low terminal state. grounded (mode=0) or floating (mode=1)
+        channel: int
+            Number of channel of interest. Must be 1 for SMUs with only one channel and 1 or 2 for SMUs with two channels. Default is 1.
+
+        Returns
+        -------
+        None
+        """
+        
+        # related command :OUTPut[c]:LOW?
+        try:
+            logging.debug('{!s}: Get low terminal state of channel {:s}'.format(__name__, self._log_chans[self._channels][channel]))
+            return ["GRO", "FLO"].index(str(self._ask(":outp{!s}:low?".format(self._cmd_chans[self._channels][channel]))))
+        except Exception as e:
+            logging.error('{!s}: Cannot set low terminal state. Is output off?'.format(__name__))
+            raise type(e)('{!s}: Cannot set low terminal state. Is output off?\n{!s}'.format(__name__, e))
+
+    def set_measurement_mode(self, mode, channel=1):
+        """
+        Sets measurement mode (wiring system) of channel <channel> to <mode>.
+
+        Parameters
+        ----------
+        mode: int
+            State of the measurement sense mode. Must be 0 (2-wire) or 1 (4-wire).
+        channel: int
+            Number of channel of interest. Must be 1 for SMUs with only one channel and 1 or 2 for SMUs with two channels. Default is 1.
+
+        Returns
+        -------
+        None
+        """
+        # Corresponding Command: :SENSe[c]:REMote 1|0|ON|OFF
+        try:
+            logging.debug('{!s}: Set measurement mode{:s} to {:d}'.format(__name__, self._log_chans[self._channels][channel], mode))
+            self._write(':sens{:s}:rem {:d}'.format(self._cmd_chans[self._channels][channel], mode))
+        except Exception as e:
+            logging.error('{!s}: Cannot set measurement mode{:s} to {!s}'.format(__name__, self._log_chans[self._channels][ channel], mode))
+            raise type(e)('{!s}: Cannot set measurement mode{:s} to {!s}\n{!s}'.format(__name__, self._log_chans[self._channels][ channel], mode, e))
+        return
 
     def get_measurement_mode(self, channel=1):
         """
@@ -697,8 +747,7 @@ class Keysight_B2900(Instrument):
         try:
             logging.debug('{!s}: Get sense mode{:s}'.format(__name__, self._log_chans[self._channels][channel]))
             # return str(self._ask(':sens:func:on?').replace('''"''', '')).lower().split(',')
-            return [key for key, val in self._IV_modes.items() if val in str(self._ask(":sens{:s}:func:on?".format(self._cmd_chans[self._channels][channel])).replace('''"''', '')).lower().split(
-                ',')]
+            return [key for key, val in self._IV_modes.items() if val in str(self._ask(":sens{:s}:func:on?".format(self._cmd_chans[self._channels][channel])).replace('''"''', '')).lower().split(',')]
         except Exception as e:
             logging.error('{!s}: Cannot get sense mode{:s}'.format(__name__, self._log_chans[self._channels][channel]))
             raise type(e)('{!s}: Cannot get sense mode{:s}\n{!s}'.format(__name__, self._log_chans[self._channels][channel], e))
@@ -1335,7 +1384,7 @@ class Keysight_B2900(Instrument):
         try:
             logging.debug('{!s}: Set bias value{:s} to {:g}'.format(__name__, self._log_chans[self._channels][channel], val))
             self._write(':sour{:s}:{:s}:lev {:g}'.format(self._cmd_chans[self._channels][channel], self._IV_modes[self.get_bias_mode(channel=channel)], val))  # necessary to cast as scientific float! (otherwise only >= 1e-6 possible)
-            self._write(':disp:view sing{:d}'.format(channel))
+            #self._write(':disp:view sing{:d}'.format(channel))
         except Exception as e:
             logging.error(
                 '{!s}: Cannot set bias value{:s} to {!s}'.format(__name__, self._log_chans[self._channels][channel], val))
@@ -1361,9 +1410,9 @@ class Keysight_B2900(Instrument):
         try:
             logging.debug('{!s}: Get bias value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
             # return float(self._ask(':sour{:s}:{:s}?'.format(self._cmd_chans[self._channels][channel], self._IV_modes[self.get_bias_mode(channel=channel)])))
-            self._write(':disp:view sing{:d}'.format(channel))
+            #self._write(':disp:view sing{:d}'.format(channel))
             if self.get_status(channel):
-                return float(self._ask(':meas:{:s}?'.format(self._IV_modes[self.get_bias_mode(channel=channel)])).replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'))
+                return float(self._ask(':meas:{:s}? (@{})'.format(self._IV_modes[self.get_bias_mode(channel=channel)], channel)).replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'))
             else:
                 return float(self._ask(':sour{:s}:{:s}:lev'.format(self._cmd_chans[self._channels][channel], self._IV_modes[self.get_bias_mode(channel=channel)])))
         except Exception as e:
@@ -1387,8 +1436,8 @@ class Keysight_B2900(Instrument):
         # Corresponding Command: [:CHANnel<n>]:MEASure?
         try:
             logging.debug('{!s}: Get sense value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
-            self._write(':disp:view sing{:d}'.format(channel))
-            return float(self._ask(':meas:{:s}?'.format(self._IV_modes[self._sense_mode[channel]])).replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'))
+            # self._write(':disp:view sing{:d}'.format(channel))
+            return float(self._ask(':meas:{:s}? (@{})'.format(self._IV_modes[self._sense_mode[channel]], channel)).replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'))
         except Exception as e:
             logging.error('{!s}: Cannot get sense value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
             raise type(e)('{!s}: Cannot get sense value{:s}\n{!s}'.format(__name__, self._log_chans[self._channels][channel], e))
@@ -1410,8 +1459,8 @@ class Keysight_B2900(Instrument):
         # Corresponding Command: :MEAS? [chanlist]
         try:
             logging.debug('{!s}: Get sense values of all active sense modes{:s}'.format(__name__, self._log_chans[self._channels][channel]))
-            self._write(':disp:view sing{:d}'.format(channel))
-            return np.fromstring(self._ask(':meas?').replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'), sep=',', dtype=float)
+            #self._write(':disp:view sing{:d}'.format(channel))
+            return np.fromstring(self._ask(':meas? (@{})'.format(channel)).replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'), sep=',', dtype=float)
         except Exception as e:
             logging.error('{!s}: Cannot get sense values of all active sense modes{:s}'.format(__name__, self._log_chans[self._channels][channel]))
             raise type(e)('{!s}: Cannot get sense values of all active sense modes{:s}\n{!s}'.format(__name__, self._log_chans[self._channels][channel], e))
@@ -1435,7 +1484,7 @@ class Keysight_B2900(Instrument):
         try:
             logging.debug('{:s}: Set voltage value{:s} to {:g}'.format(__name__, self._log_chans[self._channels][channel], val))
             self._write(':sour{:s}:volt {:g}'.format(self._cmd_chans[self._channels][channel], val))
-            self._write(':disp:view sing{:d}'.format(channel))
+            #self._write(':disp:view sing{:d}'.format(channel))
         except Exception as e:
             logging.error('{!s}: Cannot set voltage value{:s} to {!s}'.format(__name__, self._log_chans[self._channels][channel], val))
             raise type(e)('{!s}: Cannot set voltage value{:s} to {!s}\n{!s}'.format(__name__, self._log_chans[self._channels][channel], val, e))
@@ -1459,7 +1508,7 @@ class Keysight_B2900(Instrument):
         # Corresponding Command: :MEASure: < CURRent[:DC] | RESistance | VOLTage[:DC] >? [chanlist]
         try:
             logging.debug('{:s}: Get voltage value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
-            self._write(':disp:view sing{:d}'.format(channel))
+            #self._write(':disp:view sing{:d}'.format(channel))
             # return float(self._ask(':sour{:s}:volt?'.format(self._cmd_chans[self._channels][channel])))
             return float(self._ask(':meas:volt?').replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'))
         except Exception as e:
@@ -1485,7 +1534,7 @@ class Keysight_B2900(Instrument):
         try:
             logging.debug('{:s}: Set current value{:s} to {:g}'.format(__name__, self._log_chans[self._channels][channel], val))
             self._write(':sour{:s}:curr {:g}'.format(self._cmd_chans[self._channels][channel], val))
-            self._write(':disp:view sing{:d}'.format(channel))
+            #self._write(':disp:view sing{:d}'.format(channel))
         except Exception as e:
             logging.error('{!s}: Cannot set current value{:s} to {!s}'.format(__name__, self._log_chans[self._channels][channel], val))
             raise type(e)('{!s}: Cannot set current value{:s} to {!s}\n{!s}'.format(__name__, self._log_chans[self._channels][channel], val, e))
@@ -1509,7 +1558,7 @@ class Keysight_B2900(Instrument):
         # Corresponding Command: :READ[:SCALar]: <CURRent|RESistance|SOURce|STATus|TIME|VOLTage>? [chanlist]
         try:
             logging.debug('{:s}: Get current value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
-            self._write(':disp:view sing{:d}'.format(channel))
+            #self._write(':disp:view sing{:d}'.format(channel))
             # return float(self._ask(':sour{:s}:curr?'.format(self._cmd_chans[self._channels][channel])))
             return float(self._ask(':meas:curr?').replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'))
         except Exception as e:
@@ -1535,7 +1584,7 @@ class Keysight_B2900(Instrument):
         # Corresponding Command: :MEASure:<CURRent[:DC]|RESistance|VOLTage[:DC]>? [chanlist]
         try:
             logging.debug('{:s}: Get resistance value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
-            self._write(':disp:view sing{:d}'.format(channel))
+            #self._write(':disp:view sing{:d}'.format(channel))
             # return float(self._ask(':sour{:s}:res?'.format(self._cmd_chans[self._channels][channel])))
             return float(self._ask(':meas:res?').replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'))
         except Exception as e:
@@ -1561,8 +1610,8 @@ class Keysight_B2900(Instrument):
         # Corresponding Command: :MEASure? [chanlist]
         try:
             logging.debug('{:s}: Get current and voltage value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
-            self._write(':disp:view sing{:d}'.format(channel))
-            return np.fromstring(self._ask(':meas?').replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'), sep=',', dtype=float)[:2][::-1]
+            #self._write(':disp:view sing{:d}'.format(channel))
+            return np.fromstring(self._ask(':meas? (@{})'.format(channel)).replace('+9.910000E+37', 'nan').replace('9.900000E+37', 'inf'), sep=',', dtype=float)[:2][::-1]
         except Exception as e:
             logging.error('{!s}: Cannot get current and voltage value{:s}'.format(__name__, self._log_chans[self._channels][channel]))
             raise type(e)('{!s}: Cannot get current and voltage value{:s}\n{!s}'.format(__name__, self._log_chans[self._channels][channel], e))
