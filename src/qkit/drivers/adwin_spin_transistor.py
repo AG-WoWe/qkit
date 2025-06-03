@@ -348,10 +348,14 @@ class adwin_spin_transistor(Instrument):
             self.adw.Set_Par(MAF, 1)
             lockin_flag = False
 
+        # make sure all parameters are set before starting process
+        sleep(0.1)
+
         # start lockin process
         log.info('Adwin starting lockin!')
         self.adw.Start_Process(LOCKIN_PROCESS_NO)
 
+        # make sure process init has run before asking for return values
         sleep(0.1)
 
         # get actual parameters
