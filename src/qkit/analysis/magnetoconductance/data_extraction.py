@@ -119,6 +119,11 @@ class MapSTExtractor:
             metadata[key] = val
         return metadata
 
+    def get_metadata(self, mvar, dirn):
+        ''' get metadata of data dataset '''
+        dataset = self._h5data0.get(self._get_ds_url(mvar, dirn))
+        return self._get_metadata(dataset)
+
     def get_dataset(self, name):
         ''' Return dataset '''
         return self._h5data0[name]
@@ -126,6 +131,17 @@ class MapSTExtractor:
     def get_sample_rate(self):
         ''' Return sample_rate of measurement '''
         return self.get_measurement_config()['lockin']['sample_rate']
+
+    def get_sweep_rate(self):
+        ''' Return sweep rate of measurement '''
+        return self.get_measurement_config()['sweep']['rate']
+
+    def get_maf_time(self):
+        ''' Return sweep rate of measurement '''
+        conf = self.get_measurement_config()
+        maf_val = conf['lockin']['maf']
+        freq = conf['lockin']['freq']
+        return maf_val / freq
 
     def _get_ds_url(self, mvar, dirn):
         return f'{self._mfunc}.{mvar}_{dirn}'
