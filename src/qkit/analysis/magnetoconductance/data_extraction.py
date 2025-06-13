@@ -94,9 +94,8 @@ class MapSTExtractor:
         data_dict = {mvar: {} for mvar in mvars}
         metadata_dict = {mvar: {} for mvar in mvars}
         for mvar in data_dict:
-            if dirns is None:
-                dirns = self.list_dirns(mvar, echo=False)
-            for dirn in dirns:
+            mvar_dirns = dirns if dirns else self.list_dirns(mvar, echo=False)
+            for dirn in mvar_dirns:
                 data, metadata = self.get_data(mvar, dirn)
                 data_dict[mvar][dirn] = data
                 metadata_dict[mvar][dirn] = metadata
