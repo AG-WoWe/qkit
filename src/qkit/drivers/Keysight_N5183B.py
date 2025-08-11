@@ -208,9 +208,9 @@ class Keysight_N5183B(Instrument):
         logging.debug(__name__ + ' : set status to %s' % status)
                 
         if status == True:
-            self.instrument.write("OUTP ON")
+            self._instrument.write("OUTP ON")
         elif status == False:
-            self.instrument.write("OUTP OFF")
+            self._instrument.write("OUTP OFF")
         else:
             raise ValueError('set_status(): can only set True or False')
         
