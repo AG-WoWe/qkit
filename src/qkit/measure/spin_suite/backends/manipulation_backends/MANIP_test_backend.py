@@ -5,7 +5,7 @@ Created on Wed Jul 14 18:42:00 2021
 
 @author: lr1740
 """
-from qkit.measure.semiconductor.manipulation_backends.MA_backend_base import MA_backend_base
+from qkit.measure.spin_suite.backends.manipulation_backends.MA_backend_base import MA_backend_base
 
 class MA_test_backend(MA_backend_base):
     def __init__(self):

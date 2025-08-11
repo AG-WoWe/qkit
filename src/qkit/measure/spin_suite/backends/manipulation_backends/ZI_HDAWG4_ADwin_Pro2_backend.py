@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Sep 13 15:40:38 2021
+Created Sep 2022
 
-@author: Thomas
+@author: Thomas and Daniel
 """
+import time
+from qkit.measure.spin_suite.backends.manipulation_backends.MA_backend_base import MA_backend_base
 
-from qkit.measure.semiconductor.manipulation_backends.MA_backend_base import MA_backend_base
-
-class ZI_HDAWG4_backend(MA_backend_base):
-    def __init__(self, instrument):
+class ZI_HDAWG4_ADwin_Pro2_backend(MA_backend_base):
+    def __init__(self, HDAWG4, ADwinPro2):
         self.register_channel("Ch1", "V")
         self.register_channel("Ch2", "V")
         self.register_channel("Ch3", "V")
@@ -19,7 +19,8 @@ class ZI_HDAWG4_backend(MA_backend_base):
         self.register_channel("Trig3", "V")
         self.register_channel("Trig4", "V")
         
-        self.hartwig = instrument
+        self.hartwig = HDAWG4
+        self.bill = ADwinPro2
         
     def Ch1_get_sample_rate(self):
         rate = self.hartwig.get_sampling_rate()*1e-9
@@ -52,15 +53,18 @@ class ZI_HDAWG4_backend(MA_backend_base):
     def Trig4_get_sample_rate(self):
         rate = self.hartwig.get_sampling_rate()*1e-9
         return rate
-    
-    
+
     def run(self):
         self.hartwig.start_playback()
+        time.sleep(1)
+        self.bill.start_triggered_readout()
 
     def stop(self):
+        self.bill.stop_triggered_readout()
         self.hartwig.stop_playback()
         
     def load_waveform(self, wave_data):
+        self.hartwig.external_trigger = True
         self.hartwig.zdict_to_CSV(wave_data)
         self.hartwig.zcreate_sequence_program(0)
         self.hartwig.upload_to_device()

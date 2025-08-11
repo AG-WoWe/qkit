@@ -1,5 +1,5 @@
 import qkit
-#from qkit.measure.semiconductor.utils.watchdog import Watchdog
+#from qkit.spin_suite.semiconductor.utils.watchdog import Watchdog
 import time
 import numpy as np
 from findpeaks import findpeaks

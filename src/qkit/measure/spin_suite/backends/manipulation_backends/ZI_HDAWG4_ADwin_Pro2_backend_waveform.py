@@ -5,7 +5,7 @@ Created Sep 2022
 @author: Thomas and Daniel
 """
 import time
-from qkit.measure.semiconductor.manipulation_backends.MA_backend_base import MA_backend_base
+from qkit.measure.spin_suite.backends.manipulation_backends.MA_backend_base import MA_backend_base
 
 class ZI_HDAWG4_ADwin_Pro2_backend_waveform(MA_backend_base):
     def __init__(self, HDAWG4, ADwinPro2):

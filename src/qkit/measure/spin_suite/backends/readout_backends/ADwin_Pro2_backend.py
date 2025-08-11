@@ -5,7 +5,7 @@ Created on Sept 2022
 
 @author: oc0612
 """
-from qkit.measure.semiconductor.readout_backends.RO_backend_base import RO_backend_base
+from qkit.measure.spin_suite.backends.readout_backends.RO_backend_base import RO_backend_base
 import logging 
 import sys 
 

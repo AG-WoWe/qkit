@@ -64,6 +64,7 @@ Copy driver into qkit/drivers folder.
 
 from itertools import count
 from textwrap import indent
+from pathlib import Path
 import ADwin as adw
 import qkit
 from qkit.core.instrument_base import Instrument
@@ -76,14 +77,8 @@ import os
 #from scipy.signal import medfilt   # median filter for triggered readout averaging 
 
 ################################################################################################
-# Find qkit source code in C dis:
-path = None
-for root, dirs, files in os.walk("C:/"):
-        if 'qkit' in dirs and os.path.abspath(os.path.join(root, 'qkit')).__contains__('src'):
-                 path = {'path to qkit source': os.path.abspath(os.path.join(root, 'qkit'))}
-
-if path is None:
-    raise TypeError('No source folder found on C:/ disk')
+# Current qkit repository
+qkit_dir = Path(qkit.__file__).resolve().parent
 ###############################################################################################
 
 class ADwin_Pro2_V3(Instrument):
@@ -141,18 +136,18 @@ class ADwin_Pro2_V3(Instrument):
     def __init__(self,
                  name='ADwin_Pro2_V3',
                  processnumber_main=1,
-                 processpath_main = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ramp_input_V3.TC1',
+                 processpath_main = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ramp_input_V3.TC1',
                  process_number_triggered=2,
-                 process_path_triggered = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_V3.TC2',
+                 process_path_triggered = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_V3.TC2',
                  process_number_aquisition=3,
-                 process_path_aquisition = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_Stopp_V3.TC3',
+                 process_path_aquisition = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_Stopp_V3.TC3',
                  process_number_continuous=4,
                  watch_sampling_f="10kHz",
-                 process_path_continuous_2kHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_2kHz_V3.TC4',
-                 process_path_continuous_10kHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_10kHz_V3.TC4',
-                 process_path_continuous_100kHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_100kHz_V3.TC4',
-                 process_path_continuous_1MHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_1MHz_V3.TC4',
-                 process_path_continuous_4MHz = path['path to qkit source'] + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_4MHz_V3.TC4',
+                 process_path_continuous_2kHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_2kHz_V3.TC4',
+                 process_path_continuous_10kHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_10kHz_V3.TC4',
+                 process_path_continuous_100kHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_100kHz_V3.TC4',
+                 process_path_continuous_1MHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_1MHz_V3.TC4',
+                 process_path_continuous_4MHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_4MHz_V3.TC4',
                  devicenumber=1,
                  bootload=True,
                  global_lower_limit_in_V=0,

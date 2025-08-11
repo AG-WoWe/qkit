@@ -23,10 +23,10 @@ import qkit.measure.measurement_base as mb
 from qkit.measure.measurement_base import MeasureBase
 from qkit.gui.notebook.Progress_Bar import Progress_Bar
 from qkit.measure.write_additional_files import get_instrument_settings
-from qkit.measure.semiconductor.readout_backends.RO_backend_base import RO_backend_base
-from qkit.measure.semiconductor.manipulation_backends.MA_backend_base import MA_backend_base
-from qkit.measure.semiconductor.modes.mode_base import ModeBase
-from qkit.measure.semiconductor.utils.utility_objects import Mapping_handler2
+from qkit.measure.spin_suite.backends.readout_backends.RO_backend_base import RO_backend_base
+from qkit.measure.spin_suite.backends.manipulation_backends.MA_backend_base import MA_backend_base
+from qkit.measure.spin_suite.modes.mode_base import ModeBase
+from qkit.measure.spin_suite.utils.utility_objects import Mapping_handler2
 
 import qupulse
 from qupulse._program._loop import to_waveform
@@ -891,9 +891,9 @@ def main():
 
     import numpy as np
     from numpy.random import rand
-    from qkit.measure.semiconductor.spin_excite import Exciting
-    from qkit.measure.semiconductor.readout_backends import RO_test_backend2, RO_test_backend
-    from qkit.measure.semiconductor.manipulation_backends import MANIP_test_backend
+    from qkit.measure.spin_suite.spin_excite import Exciting
+    from qkit.measure.spin_suite.backends.readout_backends import RO_test_backend2, RO_test_backend
+    from qkit.measure.spin_suite.backends.manipulation_backends import MANIP_test_backend
     import numpy as np
     import matplotlib.pyplot as plt
     import logging

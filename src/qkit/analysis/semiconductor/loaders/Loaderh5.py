@@ -2,8 +2,8 @@ import h5py
 import numpy as np
 from pathlib import Path
 import urllib
-from smb.SMBHandler import SMBHandler
-import paramiko
+# from smb.SMBHandler import SMBHandler
+# import paramiko
 from qkit.analysis.semiconductor.main.interfaces import LoaderInterface
 import base64
 
@@ -26,36 +26,36 @@ class Loaderh5:
         else:
             raise ValueError("Unknown data type of given path object.")
         
-        if path.startswith("smb:"):
-            mod_path = path.replace("smb://nanospin@phi-ndus", "smb://nanospin:Hadamard_gate@phi-ndus")
-            opener = urllib.request.build_opener(SMBHandler)
-            fh = opener.open(mod_path)
-            data = h5py.File(fh,"r")["entry"]["data0"]
+        # if path.startswith("smb:"):
+        #     mod_path = path.replace("smb://nanospin@phi-ndus", "smb://nanospin:Hadamard_gate@phi-ndus")
+        #     opener = urllib.request.build_opener(SMBHandler)
+        #     fh = opener.open(mod_path)
+        #     data = h5py.File(fh,"r")["entry"]["data0"]
             
-        elif path.startswith("sftp:"):
-            if type(Pathobj) is not dict or 'authentication' not in Pathobj:
-                raise ValueError("Could not find authentication data in you path object. Please make sure your pathobject is a dictionary containing an 'authentication' key.")
+        # if path.startswith("sftp:"):
+        #     if type(Pathobj) is not dict or 'authentication' not in Pathobj:
+        #         raise ValueError("Could not find authentication data in you path object. Please make sure your pathobject is a dictionary containing an 'authentication' key.")
             
-            host = "os-login.lsdf.kit.edu"                   #hard-coded
-            port = 22
-            transport = paramiko.Transport((host, port))
-            try:
-                f=open(Pathobj['authentication']['configpath'],"r")
-            except KeyError:
-                raise AuthorizationError("sftp connection needs authorization infos. Missing authorization key in settings or wrong configpath.")
-            lines=f.readlines()
-            username=deobfuscate(deobfuscate(lines[0][:-1]))
-            password=deobfuscate(deobfuscate(lines[1][:-1]))
-            f.close()
+        #     host = "os-login.lsdf.kit.edu"                   #hard-coded
+        #     port = 22
+        #     transport = paramiko.Transport((host, port))
+        #     try:
+        #         f=open(Pathobj['authentication']['configpath'],"r")
+        #     except KeyError:
+        #         raise AuthorizationError("sftp connection needs authorization infos. Missing authorization key in settings or wrong configpath.")
+        #     lines=f.readlines()
+        #     username=deobfuscate(deobfuscate(lines[0][:-1]))
+        #     password=deobfuscate(deobfuscate(lines[1][:-1]))
+        #     f.close()
             
-            transport.connect(username = username, password = password)
-            sftp = paramiko.SFTPClient.from_transport(transport)
-            mod_path = path.split(".lsdf.kit.edu")[1]
-            fh = sftp.open(mod_path)
-            data = h5py.File(fh,"r")["entry"]["data0"]
+        #     transport.connect(username = username, password = password)
+        #     sftp = paramiko.SFTPClient.from_transport(transport)
+        #     mod_path = path.split(".lsdf.kit.edu")[1]
+        #     fh = sftp.open(mod_path)
+        #     data = h5py.File(fh,"r")["entry"]["data0"]
             
-        else:
-            data = h5py.File(path,'r')["entry"]["data0"]
+        # else:
+        data = h5py.File(path,'r')["entry"]["data0"]
             
         self.data_dict = {}
         for key in data.keys():

@@ -5,7 +5,7 @@ Created on Tue Sep  7 17:57:44 2021
 
 @author: lr1740
 """
-from qkit.measure.semiconductor.readout_backends.RO_backend_base import RO_backend_base
+from qkit.measure.spin_suite.backends.readout_backends.RO_backend_base import RO_backend_base
 
 class ZI_UHFLI_backend(RO_backend_base):
     def __init__(self, UHFLI):

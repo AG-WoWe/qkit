@@ -1,7 +1,7 @@
 import numpy as np
 import collections
 
-from qkit.measure.semiconductor.modes.mode_base import ModeBase
+from qkit.measure.spin_suite.modes.mode_base import ModeBase
 
 def makehash():
     return collections.defaultdict(makehash)

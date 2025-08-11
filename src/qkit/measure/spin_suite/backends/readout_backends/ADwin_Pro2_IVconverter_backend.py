@@ -5,7 +5,7 @@ Created on Sept 2022
 
 @author: oc0612
 """
-from qkit.measure.semiconductor.readout_backends.ADwin_Pro2_backend import ADwin_Pro2_backend
+from qkit.measure.spin_suite.backends.readout_backends.ADwin_Pro2_backend import ADwin_Pro2_backend
 import logging 
 import sys 
 
