@@ -133,7 +133,7 @@ class hdf_dataset(object):
                                              dtype = self.dtype)
                                             #  **self.meta)
                                              
-            print("Meta contents:", self.meta)
+            # print("Meta contents:", self.meta)
             self._setup_metadata()
             if self._save_timestamp:
                 self._create_timestamp_ds()

@@ -5,7 +5,7 @@ Created on Wed Jul 14 18:38:42 2021
 
 @author: lr1740
 """
-from qkit.measure.semiconductor.readout_backends.RO_backend_base import RO_backend_base
+from qkit.measure.spin_suite.backends.readout_backends.RO_backend_base import RO_backend_base
 from time import sleep
 from random import random
 import numpy as np
