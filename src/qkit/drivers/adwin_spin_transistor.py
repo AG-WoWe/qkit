@@ -277,8 +277,7 @@ class adwin_spin_transistor(Instrument):
             ADbasic driver, the lockin is always applied, but with
             amplitude 0 effectively there is no lockin signal. '''
         # stop old measurement process if still running
-        if self._state == 'measurement_ready':
-            self.adw.Stop_Process(LOCKIN_PROCESS_NO)
+        self.adw.Stop_Process(LOCKIN_PROCESS_NO)
         # set sample rate
         self.adw.Set_FPar(SAMPLE_RATE, sample_rate)
         # set bias voltage
@@ -347,9 +346,6 @@ class adwin_spin_transistor(Instrument):
             self.adw.Set_FPar(TAO_LOWPASS, 2e-6)
             self.adw.Set_Par(MAF, 1)
             lockin_flag = False
-
-        # make sure all parameters are set before starting process
-        sleep(0.1)
 
         # start lockin process
         log.info('Adwin starting lockin!')
