@@ -102,6 +102,7 @@ class adwin_electromigration(Instrument):
         card and 18-bit input card are supported. '''
     def __init__(self,
         name='my_instrument',
+        adw_system='Pro2',
         processor='T11',
         devicenumber=1,
         bootload=True,
@@ -124,7 +125,7 @@ class adwin_electromigration(Instrument):
 
         # Set 'bootload' to 'False' to not reboot the Adwin.
         if bootload:
-            self._bootload(processor)
+            self._bootload(adw_system, processor)
         else:
             firmware, version = self._read_adwin_firmware()
             if firmware != 'ELECTROMIGRATION':
@@ -342,7 +343,7 @@ class adwin_electromigration(Instrument):
             log.warning('ADwin: Fifo holds values for max %s seconds.',
             FIFO_LEN / self._sample_rate)
 
-    def _bootload(self, processor):
+    def _bootload(self, adw_system, processor):
         # before boot try to read the current outputs, which can
         # fail if the adwin was power cycled and never booted since
         firmware, version = self._read_adwin_firmware()
@@ -405,8 +406,8 @@ class adwin_electromigration(Instrument):
                 log.error(f'Adwin: Processor {processor} not supported.')
                 raise AdwinFirmwareError
             
-            em_readout_fname = f'Pro2_{processor}_readout.{ext}1'
-            em_sweep_fname = f'Pro2_{processor}_sweep.{ext}2'
+            em_readout_fname = f'{adw_system}_{processor}_readout.{ext}1'
+            em_sweep_fname = f'{adw_system}_{processor}_sweep.{ext}2'
 
             em_readout_process = adbasic_dir / em_readout_fname
             log.info('Adwin loading: %s', em_readout_process.name)
