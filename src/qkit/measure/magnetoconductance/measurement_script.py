@@ -80,10 +80,6 @@ def calc_theta(x, y):
     ''' calc func for phase shift from lockin'''
     return np.arctan2(y, x)
 
-def correct_lockin_by_amplitude(x, lockin_amplitude):
-    ''' just divide by amp or ist there a factor? check in adbasic script '''
-    pass
-
 class MeasurementScript():
     ''' The Measurement Script generates a 
     measurement routine with given params'''
@@ -131,12 +127,13 @@ class MeasurementScript():
     def setup_params(self):
         ''' setup params for the measurement'''
         self._sph = {'theta': 0, 'phi': 0, 'psi': 0, 'bp': 0, 'bt': 0}
+        self._magnet = None
         self._sweep = {'name': None, 'start': None, 'stop': None,
                        'unit': None, 'rate': None, 'duration': None,
                        'values':None, 'wait_time': None}
-        self._step = {'name':None,'start':None,'stop':None,'unit':None,
-                        'step_size':None,'values':None, 'init_time': None}
-        self._magnet = None
+        self._step = {'name': None, 'start': None, 'stop': None, 'unit': None,
+                      'step_size': None, 'values': None, 'init_time': None,
+                      'wait_time': None}
         self._volts = {'vd':None,'vg':None}
         self._lockin = {'freq': None, 'amp': None, 'tao': None,
                         'init_time': None, 'sample_rate': 500e3,
@@ -151,7 +148,7 @@ class MeasurementScript():
         ''' define setter functions of params'''
         self.set_functions = {
             'sph': self.set_sph, 'sweep': self.set_sweep,
-            'step': self.set_step, 'magnet': self.set_magnet, 
+            'step': self.set_step, 
             'volts': self.set_volts, 'lockin': self.set_lockin,
             'plot': self.set_plot, 'save': self.set_save}
 
@@ -213,7 +210,7 @@ class MeasurementScript():
         if self.dim == 1:
             self.tune.measure1D(self.plots)
         elif self.dim == 2:
-            self.tune.measure2D(self.plots, wait_time=None)
+            self.tune.measure2D(self.plots)
         else:
             assert ModuleNotFoundError
 
@@ -289,7 +286,6 @@ class MeasurementScript():
             duration = abs(val - outs_start[key]) / self.valids['maxrate'][key]
             sweep_time = max(sweep_time, duration)
         log.info(f"Sweeping to start point in {sweep_time:.1f}s!")
-        print(self.wp_start.outs)
         self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
         if self._step['init_time']:
             time.sleep(self._step['init_time'])
@@ -348,8 +344,7 @@ class MeasurementScript():
             # if sweep is variable call sweep_measure function
             else:
                 retrace = self.adwin.sweep_measure(self.wp_start.outs,
-                                                   duration=sweep_duration
-        )
+                                                   duration=sweep_duration)
         samples = len(self._sweep['values'])
         # temp contains inputs required to calcluate all save variables
         temp = {}
@@ -456,7 +451,7 @@ class MeasurementScript():
         elif self._step['name'] in self.wp_stop.outs:
             self.wp_stop.set_wp(**kwargs)
 
-    def wp_setter(self, x=None, dt=None):
+    def wp_setter(self, x=None):
         ''' set new step val of step var for wp'''
         if self._inputs['retrace']:
             temp_wp_outs=self.wp_start.outs
@@ -464,40 +459,40 @@ class MeasurementScript():
             temp_wp_outs=self.wp_stop.outs
         self.set_start_wp(**{self._step['name']:x})
         self.set_stop_wp(**{self._step['name']:x})
-        min_duration=0
-        for key,val in self.wp_start.outs.items():
-            duration = abs(val - temp_wp_outs[key])/self.valids['maxrate'][key]
-            if min_duration < duration:
-                min_duration = duration
-        if dt is None:
-            dt = min_duration
-        elif dt<min_duration:
-            log.warning(f'Fixed ramp duration {dt}s is not safe, duration was set to minimal possible duration {min_duration}s!')
-            dt = min_duration
-        self.adwin.sweep(self.wp_start.outs, duration=dt)
+        # calculate duration to go to next wp
+        dur = 0.01 # min duration values: if zero the sweep might not happen -> fix in driver?!
+        for key, val in self.wp_start.outs.items():
+            dur_by_rate = abs(val - temp_wp_outs[key])/self.valids['maxrate'][key]
+            dur = max(dur, dur_by_rate)
+        self.adwin.sweep(self.wp_start.outs, duration=dur)
+        # implement wait time
+        if self._step['wait_time']:
+            time.sleep(self._step['wait_time'])
 
     def generate_steps(self):
         ''' generate steps for step variable if possible'''
-        if None not in [self._step['start'],
-                        self._step['stop'],
-                        self._step['step_size']]:
-            steps = np.arange(self._step['start'],
-                self._step['stop'] + self._step['step_size'],
-                self._step['step_size'], dtype=np.float32)
-            if steps[-1] > self._step['stop']:
-                steps = steps[:-1]
-            self._step['values'] = np.arange(self._step['start'],
-                self._step['stop'] + self._step['step_size'],
-                self._step['step_size'], dtype=np.float32)
-            self.dim = 2
-        else:
+        start = self._step['start']
+        stop = self._step['stop']
+        step = abs(self._step['step_size'])
+        # check that all parameters are given
+        if None in [start, stop, step]:
             log.info("Couldn't generate step value list, inputs missing!")
             self.dim = 1
+            return
+        if start <= stop:
+            steps = np.arange(start, stop + step, step, dtype=np.float32)
+        else:
+            steps = np.arange(start, stop - step, -step, dtype=np.float32)
+        if steps[-1] > stop:
+            steps = steps[:-1]
+        self._step['values'] = steps
+        self.dim = 2
 
     def generate_sweep(self):
         ''' generate steps for sweep variable if possible'''
-        # check if start and stop values are given
+        # if there is not start AND stop values for the sweep given
         if None in [self._sweep['start'], self._sweep['stop']]:
+            # check if the sweep variable is time
             if self._sweep['name'] == 'time':
                 self._sweep['start'] = 0
                 self._sweep['stop'] = self._sweep['duration']
@@ -521,12 +516,13 @@ class MeasurementScript():
             raise SettingsError
         # calculate sweep values array
         samples = round(self._sweep['duration'] * self._lockin['sample_rate'])
-        self._sweep['values'] = np.linspace(self._sweep['start'],
-                                            self._sweep['stop'],
-                                            samples,
-                                            dtype=np.float32)
+        sweep_values = np.linspace(self._sweep['start'], self._sweep['stop'],
+                                   samples, dtype=np.float32)
+        if len(sweep_values) >= 1:
+            self._sweep['values'] = sweep_values
+        else:
+            raise SettingsError('No sweep values planned for this measurement!')
         log.info("Generated sweep values!")
-
 
     def get_sph(self):
         ''' getter func for sph vars'''
@@ -656,13 +652,6 @@ class MeasurementScript():
                         else:
                             log.error(f'Value of {key} must be float or integer!')
 
-    def set_magnet(self, val):
-        ''' setter func for magnet'''
-        if val in self.valids['magnet']:
-            self._magnet = val
-        else:
-            log.error(f'{val} is no valid mode for magnet!')
-
     def set_volts(self, **kwargs):
         ''' setter func for volts'''
         for key, val in kwargs.items():
@@ -710,12 +699,17 @@ class MeasurementScript():
 
     def set_sph(self, **kwargs):
         ''' update all given spherical b parameters '''
-        for key,val in kwargs.items():
+        for key, val in kwargs.items():
             if key in self._sph:
                 if isinstance(val,(int,float)):
                     self._sph[key] = val
                 else:
                     log.error(f'Value of {key} must be float or integer!')
+            elif key == 'magnet':
+                if val in self.valids['magnet']:
+                    self._magnet = val
+                else:
+                    log.error('Magnet mode not supported!')        
 
     def save_config(self):
         ''' save measurement config in dataset of .h/hdf5 file'''

@@ -26,7 +26,7 @@ class Tuning_ST(Tuning):
             self._end_measurement()
 
 
-    def measure2D(self, data_to_show = None, wait_time=None):
+    def measure2D(self, data_to_show = None):
         """
         Starts a 2D - measurement, with y being the inner and x the outer loop coordinate.
         
@@ -44,8 +44,7 @@ class Tuning_ST(Tuning):
 
         try:
             for x_val in self._x_parameter.values:
-                # x_wait = self._x_parameter.wait_time
-                self._x_parameter.set_function(x_val, dt=wait_time)
+                self._x_parameter.set_function(x_val)
                 self._acquire_log_functions()
                 latest_trace = self.multiplexer.measure()
                 self._append_vector(latest_trace, self._datasets, direction = 1)
