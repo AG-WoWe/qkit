@@ -80,7 +80,7 @@ class hdf_dataset(object):
         
     def _setup_metadata(self):
         ds = self.ds
-        ds.attrs.create('ds_type',self.ds_type)            
+        ds.attrs.create('ds_type',self.ds_type)
         ds.attrs.create("comment",self.comment.encode())
         ds.attrs.create('ds_url',self.ds_url.encode())
         if self.ds_type != ds_types['txt']:
@@ -91,6 +91,8 @@ class hdf_dataset(object):
                 ds.attrs.create("y_ds_url",self.y_object.ds_url.encode())
             if self.z_object:
                 ds.attrs.create("z_ds_url",self.z_object.ds_url.encode())
+        if self.meta.get("is_axis_reversed", None) is not None:
+            ds.attrs.create("is_axis_reversed", self.meta.pop("is_axis_reversed"))
 
 
     def next_matrix(self):
@@ -130,8 +132,7 @@ class hdf_dataset(object):
                                              folder=self.folder,
                                              dim = self.dim,
                                              ds_type = self.ds_type,
-                                             dtype = self.dtype,
-                                             **self.meta)
+                                             dtype = self.dtype)
             self._setup_metadata()
             if self._save_timestamp:
                 self._create_timestamp_ds()
