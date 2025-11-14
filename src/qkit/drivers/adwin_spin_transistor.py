@@ -179,14 +179,19 @@ class adwin_spin_transistor(Instrument):
 ####################### MEASUREMENT ROUTINES ###########################
 ########################################################################
 
-    def sweep(self, target, duration, wait=True):
+    def sweep(self, target, duration, wait=True, clearFIFO=True):
         """ Ramp the outputs of the ADwin wihtout measurement.
             If wait==True it waits for the sweep to be finished. """
+        # sanity checks
+        self._check_measurement_active()
+        self._warn_if_fifo_to_small(duration)
+        # start sweep
         self._start_sweep(target, duration)
         while wait is True and self.adw.Get_Par(SWEEP_ACTIVE) == 1:
             pass
-        for i in INS.values():
-            self.adw.Fifo_Clear(i)
+        if clearFIFO:
+            for i in INS.values():
+                self.adw.Fifo_Clear(i)
         if wait is True:
             log.info('Adwin finished sweep.')
         else:
@@ -251,18 +256,21 @@ class adwin_spin_transistor(Instrument):
         ''' Fetch all data from the fifos which has been set as inputs
             during init_measurement() and clear all other fifos '''
         res = {'inph': None, 'quad': None, 'raw': None}
+        samples = self.adw.Fifo_Full(INS['raw'])     # same samplesize for all FIFOs
         for key in res:
             if key in self._inputs:
-                samples = self.adw.Fifo_Full(INS[key])
                 # Get input in bit values
-                tmp = self.adw.GetFifo_Float(INS[key], samples)
-                # Transform bit to physical quantity
-                qty = self.aio.bit2qty(tmp, name='input', absolute=False)
-                # if inph or quad component divide by amplitude to get dI/dV
-                if key in ['inph', 'quad']:
-                    res[key] = np.divide(qty, self._lockin_amp)
+                if samples:
+                    tmp = self.adw.GetFifo_Float(INS[key], samples)
+                    # Transform bit to physical quantity
+                    qty = self.aio.bit2qty(tmp, name='input', absolute=False)
+                    # if inph or quad component divide by amplitude to get dI/dV
+                    if key in ['inph', 'quad']:
+                        res[key] = np.divide(qty, self._lockin_amp)
+                    else:
+                        res[key] = qty
                 else:
-                    res[key] = qty
+                    res[key] = np.array([])
             else:
                 self.adw.Fifo_Clear(INS[key])
         return res
@@ -277,7 +285,8 @@ class adwin_spin_transistor(Instrument):
             ADbasic driver, the lockin is always applied, but with
             amplitude 0 effectively there is no lockin signal. '''
         # stop old measurement process if still running
-        self.adw.Stop_Process(LOCKIN_PROCESS_NO)
+        if self._state == 'measurement_ready':
+            self.adw.Stop_Process(LOCKIN_PROCESS_NO)
         # set sample rate
         self.adw.Set_FPar(SAMPLE_RATE, sample_rate)
         # set bias voltage
@@ -369,6 +378,8 @@ class adwin_spin_transistor(Instrument):
         else:
             log.warning('ADwin dc measurement initialized with '
                         + 'sample_rate = %s', sample_rate)
+        for i in INS.values():
+            self.adw.Fifo_Clear(i)
 
     def stop_measurement(self):
         """ Stops the lockin process. No lockin signal is applied and no
@@ -445,7 +456,7 @@ class adwin_spin_transistor(Instrument):
             the adwin in which the adwin can loose this information. '''
         for name, val in outs.items():
             # If output value is given as physical quantity-> translate
-            if val_format is 'qty':
+            if val_format == 'qty':
                 val = self.aio.qty2bit(val, name=name, absolute=True)
             # Get ADbasic Par No. of output 'key' defined by convention
             card, channel = self.aio.get_card_channel(name)
