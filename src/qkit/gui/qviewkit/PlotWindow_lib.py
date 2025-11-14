@@ -41,9 +41,9 @@ from qkit.core.lib.misc import str3
 
 def _init_polarplot(self, graphicsView):
     graphicsView.mpl_connect('motion_notify_event', self.on_mouse_move)
-    # Cursor hinzufügen
+    # add cursor
     self.cursor = Cursor(graphicsView.axes, useblit=True, color='red', linewidth=1)
-    # Initiale Daten plotten
+    # plot initial empty data
     xyzurls = str3(self.ds.attrs.get("xyz", ""))
     ds_urls = [xyzurls.split(":")[0], xyzurls.split(":")[1], xyzurls.split(":")[2]]
     if xyzurls:
@@ -56,15 +56,18 @@ def _init_polarplot(self, graphicsView):
     stepvar = names[0]
     sweepunit = units[1]
     sweeprange = [0, max(y_data)]
+    # split data into negative and positive y values
     self.polarsplit = int(len(y_data[:]) / 2)
     self.swp_neg = abs(y_data[:self.polarsplit])
     self.swp_pos = y_data[self.polarsplit:]
     self.angle_pos = x_data / 180 * np.pi
     self.angle_neg = self.angle_pos + np.pi
+    # create empty data matrix
     nans = np.full((len(x_data), len(y_data)), np.nan)
     new_val = np.reshape(nans.T, (len(y_data), len(x_data)))
     val_neg = new_val[:self.polarsplit]
     val_pos = new_val[self.polarsplit:]
+    # initial plot
     graphicsView.axes.grid(False)
     graphicsView.axes.set_yticks([])
     self.pos_mesh = graphicsView.axes.pcolormesh(self.angle_pos, self.swp_pos, val_pos, shading='nearest')
@@ -74,14 +77,6 @@ def _init_polarplot(self, graphicsView):
 
 def _display_polarplot(self, graphicsView):
     """displays a 2d matrix of data color coded in a polarplot.
-    
-    Args:
-        self: Object of the PlotWindow class.
-        graphicsView: Modified object of matplotlib's FigureCanvasQTAgg class.
-
-    Returns:
-        No return variable. The function operates on an object of the 
-        PlotWindow class.
     """
     xyzurls = str3(self.ds.attrs.get("xyz", ""))
     ds_urls = [xyzurls.split(":")[0], xyzurls.split(":")[1], xyzurls.split(":")[2]]
@@ -105,19 +100,24 @@ def _display_polarplot(self, graphicsView):
         self.complete = True
     new_val = np.reshape(data.T, (len(y_data), len(x_data)))
     
-    # Daten für die Polar Heatmap vorbereiten
+    # split data into negative and positive y values
     val_neg = new_val[:self.polarsplit]
     val_pos = new_val[self.polarsplit:]
 
-    # Alte pcolormesh-Objekte entfernen
+    # remove old pcolormesh objects
     self.pos_mesh.remove()
     self.neg_mesh.remove()
 
-    # Neue pcolormesh-Objekte erstellen
-    self.pos_mesh = graphicsView.axes.pcolormesh(self.angle_pos, self.swp_pos, val_pos, shading='nearest')
-    self.neg_mesh = graphicsView.axes.pcolormesh(self.angle_neg, self.swp_neg, val_neg, shading='nearest')
-
-    # Canvas neu zeichnen
+    # determine vmin and vmax ignoring NaN and inf values to have same color scale for both meshes
+    vmin = np.nanmin(new_val) if np.isfinite(new_val).any() else None
+    vmax = np.nanmax(new_val) if np.isfinite(new_val).any() else None
+    mesh_kwargs = {"shading": "nearest"}
+    if vmin is not None and vmax is not None:
+        mesh_kwargs.update({"vmin": vmin, "vmax": vmax})
+    # create new pcolormesh objects
+    self.pos_mesh = graphicsView.axes.pcolormesh(self.angle_pos, self.swp_pos, val_pos, **mesh_kwargs)
+    self.neg_mesh = graphicsView.axes.pcolormesh(self.angle_neg, self.swp_neg, val_neg, **mesh_kwargs)
+    # redraw canvas
     graphicsView.draw()
 
 
@@ -182,10 +182,13 @@ def _display_1D_view(self, graphicsView):
                     y_data_len = len(y_data)
                     if x_data_len != y_data_len:
                         if x_data_len > y_data_len:
-                            x_data = x_data[:y_data_len]
+                            x_data = x_data[-y_data_len:][::-1] if _resolve_axis_direction(dss[1]) else x_data[:y_data_len]
                         else:
                             y_data = y_data[:x_data_len]
-                
+                            x_data = x_data[:][::-1] if _resolve_axis_direction(dss[1]) else x_data
+                    else:
+                        x_data = x_data[::-1] if _resolve_axis_direction(dss[1]) else x_data
+
                 elif y_ds_type == ds_types['matrix']:
                     if view_params.get('transpose',False):
                         self.VTraceYSelector.setEnabled(True)
@@ -214,9 +217,12 @@ def _display_1D_view(self, graphicsView):
                     y_data_len = len(y_data)
                     if x_data_len != y_data_len:
                         if x_data_len > y_data_len:
-                            x_data = x_data[:y_data_len]
+                            x_data = x_data[-y_data_len:][::-1] if _resolve_axis_direction(dss[1]) else x_data[:y_data_len]
                         else:
                             y_data = y_data[:x_data_len]
+                            x_data = x_data[:x_data_len][::-1] if _resolve_axis_direction(dss[1]) else x_data[:x_data_len]
+                    else:
+                        x_data = x_data[::-1] if _resolve_axis_direction(dss[1]) else x_data
                 
                 elif y_ds_type == ds_types['box']:
                     self.VTraceXSelector.setEnabled(True)
@@ -358,7 +364,11 @@ def _display_1D_data(self, graphicsView):
         # timestamps do (not?) have a x_ds_url in the 1d case. This is more a bug to be fixed in the
         # timstamp_ds part of qkit the resulting error is fixed here for now.
         try:
-            x_data = dss[0][()][:dss[1].shape[-1]]  # x_data gets truncated to y_data shape if necessarry
+            x_data = dss[0][()]             # x_data
+            y_len = dss[1].shape[-1]        # y_data length
+            
+            # truncate to y_data length and reverse axis direction if needed
+            x_data = x_data[-y_len:][::-1] if _resolve_axis_direction(self.ds) else x_data[:y_len]
         except:
             x_data = [i for i in range(dss[1].shape[-1])]
             units[0] = "#"
@@ -383,6 +393,7 @@ def _display_1D_data(self, graphicsView):
         For a matrix type the data to be displayed on the x-axis depends on the selected plot_type
         """
         if self.PlotTypeSelector.currentIndex() == 1:  # y_ds on x-axis
+            print("Plotting y_ds on x-axis")
             dss, names, units, scales = _get_all_ds_names_units_scales(self.ds, ['y_ds_url'])
             self.TraceXSelector.setRange(-1 * self.ds.shape[0], self.ds.shape[0] - 1)
             if self.TraceXValueChanged:
@@ -391,7 +402,11 @@ def _display_1D_data(self, graphicsView):
                 text has to be adjusted.
                 """
                 # calc trace number from entered value
-                (x0, dx) = _get_axis_scale(_get_ds(self.ds, _get_ds_url(self.ds, 'x_ds_url')))
+                if _resolve_axis_direction(dss[0]):
+                    print("trying reversed axis scale")
+                    (x0, dx) = _get_reversed_axis_scale(_get_ds(self.ds, _get_ds_url(self.ds, 'y_ds_url')))
+                else:
+                    (x0, dx) = _get_axis_scale(_get_ds(self.ds, _get_ds_url(self.ds, 'y_ds_url')))
                 num = int((self._traceX_value - x0) / dx)
                 self.TraceXNum = num
                 self.TraceXSelector.setValue(self.TraceXNum)
@@ -401,6 +416,7 @@ def _display_1D_data(self, graphicsView):
             x_data = dss[0][()][:dss[1].shape[-1]]  # x_data gets truncated to y_data shape if neccessary
         
         if self.PlotTypeSelector.currentIndex() == 2:  # x_ds on x-axis
+            print("Plotting x_ds on x-axis")
             dss, names, units, scales = _get_all_ds_names_units_scales(self.ds, ['x_ds_url'])
             self.TraceXSelector.setRange(-1 * self.ds.shape[1], self.ds.shape[1] - 1)
             if self.TraceYValueChanged:
@@ -707,6 +723,10 @@ def _display_2D_data(self, graphicsView):
     if np.all(np.isnan(data)):
         data[(0,) * len(data.shape)] = 0
         print("Your Data array is all NaN. I set the first value to not blow up graphics window.")
+    
+    # adjust y-axis direction for downsweeps if needed
+    scales[1] = _get_reversed_axis_scale(dss[1]) if _resolve_axis_direction(self.ds) else scales[1]
+
     graphicsView.setImage(data, pos=(scales[0][0] - scales[0][1] / 2., scales[1][0] - scales[1][1] / 2.), scale=(scales[0][1], scales[1][1]))
     graphicsView.show()
     
@@ -915,6 +935,34 @@ def _get_axis_scale(ds):
     except:
         return (0, 1)
 
+def _get_reversed_axis_scale(ds):
+    """Returns the scale of a coordinate, x0 and dx at an assumed linear 
+    scaling.
+    
+    Args:
+        ds: hdf_dataset.
+
+    Returns:
+        Tuple with of axis origin and delta distance.
+    """
+    try:
+        x0 = ds[-1]
+        dx = ds[-2] - ds[-1]
+        return (x0, dx)
+    except:
+        return (0, 1)
+
+def _resolve_axis_direction(ds):
+    """Returns if the axis is inverted.
+
+    Args:
+        ds: hdf_dataset.
+
+    Returns:
+        Boolean, True if axis is inverted.
+    """
+    return ds.attrs.get('is_axis_reversed', False)
+    
 
 def _get_unit(ds):
     """Returns the unit of a dataset.
@@ -928,7 +976,6 @@ def _get_unit(ds):
     try:
         return str3(ds.attrs.get('unit', b'_none_'))
     except AttributeError as e:
-        #print(ds)
         print("Qviewkit _get_unit:",e)
         return '_none_'
 
@@ -946,7 +993,6 @@ def _get_name(ds):
     try:
         return str3(ds.attrs.get('name', b'_none_'))
     except AttributeError as e:
-        #print(ds)
         print("Qviewkit _get_name:",e)
         return '_none_'
 
