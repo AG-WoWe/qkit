@@ -448,28 +448,28 @@ class Measure1D:
         ''' save measurement config, create emergency stop button
             and start activated measurement'''
         # save config in .hdf5 file
-        self.save_config()
+        # self.save_config()
+        if self._sweep_readout_freq == 0:
+            self.gui_window.title("Measurement running")
 
-        self.gui_window.title("Measurement running")
+            # Add label and button
+            label = tk.Label(self.gui_window, text="Measurement running...\nClick to stop")
+            label.pack(padx=40, pady=20)
+            stop_button = tk.Button(self.gui_window, text="Stop", command=self.stop_measurement, bg="red", fg="white")
+            stop_button.pack(padx=40, pady=20)
 
-        # Add label and button
-        label = tk.Label(self.gui_window, text="Measurement running...\nClick to stop")
-        label.pack(padx=40, pady=20)
+            # start measurement in separate thread
+            t = threading.Thread(target=self.tune.measure1D, kwargs={
+                    'data_to_show': self._plot,
+                    'readout_dur': 1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+                    'stop_event': self.stop_event})
+            t.start()
 
-        stop_button = tk.Button(self.gui_window, text="Stop", command=self.stop_measurement, bg="red", fg="white")
-        stop_button.pack(padx=40, pady=20)
-
-        # start measurement in separate thread
-        # self.tune.measure1D(data_to_show=self.plots, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
-        #                     stop_event=self.stop_event)
-        t = threading.Thread(target=self.tune.measure1D, kwargs={
-                'data_to_show': self.plots,
-                'readout_dur': 1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
-                'stop_event': self.stop_event})
-        t.start()
-
-        # start GUI
-        self.gui_window.mainloop()
+            # start GUI
+            self.gui_window.mainloop()
+        else:
+            self.tune.measure1D(data_to_show=self._plot, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+                                stop_event=self.stop_event)
 
     def stop_measurement(self):
         ''' stop measurement'''
@@ -579,7 +579,7 @@ class Measure1D:
         for meas, traces in self._plot.items():
             for trd in traces:
                 plotted_data.append(f'sweep_measure.{meas}_{trd}')
-        self.plots = plotted_data or None
+        self._plot = plotted_data or None
 
     def add_view(self):
         ''' add 1D view trace and retrace in one plot'''
@@ -729,6 +729,8 @@ class Measure1D:
         self.save.add('plot', self.get_plot())
         self.save.add('save', self.get_save())
         self.save.add('config', self.adwin.aio.get_config())
+
+
     def load_config(self, h5_path):
         ''' load measurement config from .h/hdf5 file'''
         try:
@@ -803,6 +805,7 @@ class Measure2D(Measure1D):
                         if isinstance(val, (int, float)):
                             self._step[key] = val
                         else:
+                            log.info(f'Skip setting step param {key} with value {val}!')
                             log.error(f'Value of {key} must be float or integer!')
 
     def get_step(self):
@@ -864,11 +867,11 @@ class Measure2D(Measure1D):
                 )
 
     def save_config(self):
-        super().save_config()
+        # super().save_config()
         self.save.add('step', self.get_step())
 
     def start_measurement(self):
         ''' start activated measurement'''
-        self.save_config()
-        self.tune.measure2D(self.plots, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+        # self.save_config()
+        self.tune.measure2D(self._plot, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
                             stop_event=self.stop_event)
