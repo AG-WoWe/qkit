@@ -23,7 +23,8 @@ class Tuning_ST(Tuning):
         """
         assert self._x_parameter, f"{__name__}: Cannot start measure1D. x_parameters required."
         self._measurement_object.measurement_func = "%s: measure1D" % __name__
-        # self.pb = Progress_Bar(len(self._x_parameter.values)*len(self.multiplexer.get_active_measurements()))
+        if readout_dur == 0:
+            self.pb = Progress_Bar(len(self._x_parameter.values)*len(self.multiplexer.get_active_measurements()))
 
         self._open_qviewkit(datasets = data_to_show)
         try:
@@ -70,7 +71,8 @@ class Tuning_ST(Tuning):
 
                     # Update sweep_samples and progress bar
                     sweep_samples += len_latest_data
-                    # self.pb.iterate(addend = len_latest_data)
+                    if readout_dur == 0:
+                        self.pb.iterate(addend = len_latest_data)
 
                     # Check for watchdog stop
                     if self.watchdog.stop:
@@ -157,6 +159,11 @@ class Tuning_ST(Tuning):
                                         for key in latest_data:
                                             latest_data[key] = latest_data[key][:len_latest_data]
                                     self._append_vector(latest_data, self._datasets, direction = 1, pointwise=True)
+                                elif len_latest_data == 0 and sweep_samples != 0:
+                                    # fill missing data with nans
+                                    for key in latest_data:
+                                        self._append_vector({key: [nan]*(len(self._x_parameter.values)-sweep_samples)}, self._datasets, direction = 1)
+                                    len_latest_data = len(self._x_parameter.values)-sweep_samples
                             else:
                                 len_latest_data = 0
 
