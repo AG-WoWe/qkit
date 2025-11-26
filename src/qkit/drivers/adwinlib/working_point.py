@@ -212,6 +212,9 @@ class WorkingPoint():
             # calculate Bp as linear comb. of E_theta and E_phi
             # Bp_vec =  Bp * ( cos(psi) * E_theta + sin(psi)  * E_phi )
             bp_vec = bp * (cos(psi) * e_theta + sin(psi) * e_phi)
+
+        else:
+            raise Exception(f'Vector3D mode {vector3d["mode"]} not recognized')
         
         # cartesian = superposition of parallel and transverse fields
         b_vec = bt_vec + bp_vec
