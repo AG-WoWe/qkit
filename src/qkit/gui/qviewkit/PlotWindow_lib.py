@@ -393,7 +393,6 @@ def _display_1D_data(self, graphicsView):
         For a matrix type the data to be displayed on the x-axis depends on the selected plot_type
         """
         if self.PlotTypeSelector.currentIndex() == 1:  # y_ds on x-axis
-            print("Plotting y_ds on x-axis")
             dss, names, units, scales = _get_all_ds_names_units_scales(self.ds, ['y_ds_url'])
             self.TraceXSelector.setRange(-1 * self.ds.shape[0], self.ds.shape[0] - 1)
             if self.TraceXValueChanged:
@@ -403,7 +402,6 @@ def _display_1D_data(self, graphicsView):
                 """
                 # calc trace number from entered value
                 if _resolve_axis_direction(dss[0]):
-                    print("trying reversed axis scale")
                     (x0, dx) = _get_reversed_axis_scale(_get_ds(self.ds, _get_ds_url(self.ds, 'y_ds_url')))
                 else:
                     (x0, dx) = _get_axis_scale(_get_ds(self.ds, _get_ds_url(self.ds, 'y_ds_url')))
@@ -412,11 +410,20 @@ def _display_1D_data(self, graphicsView):
                 self.TraceXSelector.setValue(self.TraceXNum)
                 self.TraceXValueChanged = False
             
+            try:
+                x_data = dss[0][()]             # x_data
+                y_len = dss[1][()][self.TraceXNum].shape[-1]        # y_data length
+                
+                # truncate to y_data length and reverse axis direction if needed
+                x_data = x_data[-y_len:][::-1] if _resolve_axis_direction(self.ds) else x_data[:y_len]
+            except:
+                x_data = [i for i in range(dss[1].shape[-1])]
+                units[0] = "#"
+                names[0] = "data point number"
+
             y_data = dss[1][()][self.TraceXNum]
-            x_data = dss[0][()][:dss[1].shape[-1]]  # x_data gets truncated to y_data shape if neccessary
         
         if self.PlotTypeSelector.currentIndex() == 2:  # x_ds on x-axis
-            print("Plotting x_ds on x-axis")
             dss, names, units, scales = _get_all_ds_names_units_scales(self.ds, ['x_ds_url'])
             self.TraceXSelector.setRange(-1 * self.ds.shape[1], self.ds.shape[1] - 1)
             if self.TraceYValueChanged:
