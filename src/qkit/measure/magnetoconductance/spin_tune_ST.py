@@ -162,8 +162,8 @@ class Tuning_ST(Tuning):
                                 elif len_latest_data == 0 and sweep_samples != 0:
                                     # fill missing data with nans
                                     for key in latest_data:
-                                        self._append_vector({key: [nan]*(len(self._x_parameter.values)-sweep_samples)}, self._datasets, direction = 1)
-                                    len_latest_data = len(self._x_parameter.values)-sweep_samples
+                                        self._append_vector({key: [nan]*(len(self._y_parameter.values)-sweep_samples)}, self._datasets, direction = 1, pointwise=True)
+                                    len_latest_data = len(self._y_parameter.values)-sweep_samples
                             else:
                                 len_latest_data = 0
 
