@@ -256,9 +256,12 @@ class adwin_spin_transistor(Instrument):
         ''' Fetch all data from the fifos which has been set as inputs
             during init_measurement() and clear all other fifos '''
         res = {'inph': None, 'quad': None, 'raw': None}
-        samples = self.adw.Fifo_Full(INS['raw'])     # same samplesize for all FIFOs
+        # Get same number of samples for inph and quad, needed for amp calculation
+        samples = min(self.adw.Fifo_Full(INS['inph']), self.adw.Fifo_Full(INS['quad']))
         for key in res:
             if key in self._inputs:
+                if key == 'raw':
+                    samples = self.adw.Fifo_Full(INS[key])
                 # Get input in bit values
                 if samples:
                     tmp = self.adw.GetFifo_Float(INS[key], samples)
