@@ -112,7 +112,7 @@ class Measure1D:
             'calc': {'amp': ['inph', 'quad'], 'phase': ['inph', 'quad']},
             'calc_func': {'amp': calc_r, 'phase': calc_theta},
             'maxrate': {'bx': 0.3, 'by': 0.3, 'bz': 0.3, 'bp': 0.3,
-                        'bt': 0.1, 'vg': 1, 'vd': 0.5, 'time': 1e6},
+                        'bt': 0.3, 'vg': 0.1, 'vd': 0.1, 'time': 1e6},
             'unit': {'inph': 'S', 'quad': 'S', 'raw': 'I', 'amp': 'S', 'phase': 'rad'},
         }
 
@@ -157,6 +157,8 @@ class Measure1D:
         # self._step = {'name': None, 'start': None, 'stop': None, 'unit': None,
         #               'step_size': None, 'values': None, 'init_time': None,
         #               'wait_time': None}
+        self._pulse = {'name': 'vd', 'amp': None, 'rate': None, 'unit': 'V',
+                       'delay_time': 0.0, 'wait_time': 0.0, 'traces': []}
         self._lockin = {'freq': None, 'amp': None, 'tao': None,
                         'init_time': None, 'sample_rate': 500e3,
                         'phase': None, 'maf': None}
@@ -164,6 +166,7 @@ class Measure1D:
         self._plot = {'inph': set(), 'quad': set(), 'raw': set(), 'amp': set(), 'phase': set()}
         self._save = {'inph': set(), 'quad': set(), 'raw': set(), 'amp': set(), 'phase': set()}
         self._temp = {}
+        self._plot_dss = []
 
     def def_setter(self):
         ''' define setter funcs for measurement config params'''
@@ -171,6 +174,7 @@ class Measure1D:
             'wp_params': self.set_wp_params,
             'sweep': self.set_sweep,
             'step': self.set_step,
+            'pulse': self.set_pulse,
             'lockin': self.set_lockin,
             'plot': self.set_plot,
             'save': self.set_save}
@@ -212,6 +216,18 @@ class Measure1D:
         if self._sweep_readout_freq == 0:
             pass
         else:
+            if 'trace' in self._pulse.get('traces', []):
+                time.sleep(self._pulse['delay_time'])
+                # pulse vd before trace measurement
+                pulse = self._pulse['name']
+                temp = self.wp_start.outs[pulse]
+                self.wp_start.set(**{pulse: self._pulse['amp']+temp})
+                self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
+                self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+                time.sleep(self._pulse['wait_time'])
+                self.wp_start.set(**{pulse: temp})
+                self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+        
             self.adwin.sweep(self.wp_stop.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
 
@@ -222,6 +238,18 @@ class Measure1D:
         if self._sweep_readout_freq == 0:
             pass
         else:
+            if 'retrace' in self._pulse.get('traces', []):
+                time.sleep(self._pulse['delay_time'])
+                # pulse vd before trace measurement
+                pulse = self._pulse['name']
+                temp = self.wp_stop.outs[pulse]
+                self.wp_stop.set(**{pulse: self._pulse['amp']+temp})
+                self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
+                self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+                time.sleep(self._pulse['wait_time'])
+                self.wp_stop.set(**{pulse: temp})
+                self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+        
             self.adwin.sweep(self.wp_start.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
     
@@ -235,6 +263,18 @@ class Measure1D:
 
     def measure_trace(self):
         ''' measure trace and generate data dict'''
+        if 'trace' in self._pulse.get('traces', []) and self._sweep_readout_freq == 0:
+            time.sleep(self._pulse['delay_time'])
+            # pulse vd before trace measurement
+            pulse = self._pulse['name']
+            temp = self.wp_start.outs[pulse]
+            self.wp_start.set(**{pulse: self._pulse['amp']+temp})
+            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
+            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+            time.sleep(self._pulse['wait_time'])
+            self.wp_start.set(**{pulse: temp})
+            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+        
         # sleep for wait_time if set up
         if self._sweep['wait_time']:
             time.sleep(self._sweep['wait_time'])
@@ -253,6 +293,18 @@ class Measure1D:
 
     def measure_retrace(self):
         ''' measure retrace and generate data dict'''
+        if 'retrace' in self._pulse.get('traces', []) and self._sweep_readout_freq == 0:
+            time.sleep(self._pulse['delay_time'])
+            # pulse vd before retrace measurement
+            pulse = self._pulse['name']
+            temp = self.wp_stop.outs[pulse]
+            self.wp_stop.set(**{pulse: self._pulse['amp']+temp})
+            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
+            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+            time.sleep(self._pulse['wait_time'])
+            self.wp_stop.set(**{pulse: temp})
+            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+        
         # sleep for wait_time if set up
         if self._sweep['wait_time']:
             time.sleep(self._sweep['wait_time'])
@@ -318,9 +370,16 @@ class Measure1D:
         save = {}
         for meas, traces in self._save.items():
             if "difference" in traces:
-                save[f'{meas}_difference'] = np.flip(self.retrace[f'{meas}_retrace']) - self.trace[f'{meas}_trace']
+                if len(self.trace[f'{meas}_trace']) == len(self.retrace[f'{meas}_retrace']):
+                    save[f'{meas}_difference'] = np.flip(self.retrace[f'{meas}_retrace']) - self.trace[f'{meas}_trace']
+                elif len(self.trace[f'{meas}_trace']) < len(self.retrace[f'{meas}_retrace']):
+                    n = len(self.trace[f'{meas}_trace'])
+                    save[f'{meas}_difference'] = np.flip(self.retrace[f'{meas}_retrace'])[:n] - self.trace[f'{meas}_trace']
+                elif len(self.trace[f'{meas}_trace']) > len(self.retrace[f'{meas}_retrace']):
+                    n = len(self.retrace[f'{meas}_retrace'])
+                    save[f'{meas}_difference'] = np.flip(self.retrace[f'{meas}_retrace']) - self.trace[f'{meas}_trace'][:n]
         return save
-        
+
 
     def correct_len(self, trace, samples):
         ''' If the length of a trace is not exactly what is expected, either
@@ -329,7 +388,8 @@ class Measure1D:
             The discrepancy is usally +-2 samples and therefore negligable '''
         if self._sweep_readout_freq == 0:
             n = len(trace)
-            print(f'Correcting length from {n} to {samples} samples!')
+            if n != samples:
+                log.warning(f'Correcting length from {n} to {samples} samples!')
         else:
             assert Exception("correct_len only works for non-live readout!")
 
@@ -377,8 +437,6 @@ class Measure1D:
             sweep_time = max(sweep_time, duration)
         log.info(f"Sweeping to start point in {sweep_time:.1f}s!")
         self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
-        # if self._step['init_time']:
-        #     time.sleep(self._step['init_time'])
 
 # ------------------- Input creation & registration via tune -------------------
 
@@ -448,8 +506,8 @@ class Measure1D:
         ''' save measurement config, create emergency stop button
             and start activated measurement'''
         # save config in .hdf5 file
-        # self.save_config()
-        if self._sweep_readout_freq == 0:
+        self.save_config()
+        if self._sweep_readout_freq != 0:
             self.gui_window.title("Measurement running")
 
             # Add label and button
@@ -460,7 +518,7 @@ class Measure1D:
 
             # start measurement in separate thread
             t = threading.Thread(target=self.tune.measure1D, kwargs={
-                    'data_to_show': self._plot,
+                    'data_to_show': self._plot_dss,
                     'readout_dur': 1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
                     'stop_event': self.stop_event})
             t.start()
@@ -468,7 +526,8 @@ class Measure1D:
             # start GUI
             self.gui_window.mainloop()
         else:
-            self.tune.measure1D(data_to_show=self._plot, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+            print("Plot the following datasets: ", self._plot_dss)
+            self.tune.measure1D(data_to_show=self._plot_dss, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
                                 stop_event=self.stop_event)
 
     def stop_measurement(self):
@@ -578,8 +637,14 @@ class Measure1D:
         plotted_data = []
         for meas, traces in self._plot.items():
             for trd in traces:
-                plotted_data.append(f'sweep_measure.{meas}_{trd}')
-        self._plot = plotted_data or None
+                match trd:
+                    case 'trace':
+                        plotted_data.append(f'measure_trace.{meas}_{trd}')
+                    case 'retrace':
+                        plotted_data.append(f'measure_retrace.{meas}_{trd}')
+                    case 'difference':
+                        plotted_data.append(f'calc_difference.{meas}_{trd}')
+        self._plot_dss = plotted_data or None
 
     def add_view(self):
         ''' add 1D view trace and retrace in one plot'''
@@ -621,6 +686,10 @@ class Measure1D:
     def get_lockin(self):
         ''' getter for lockin params'''
         return self._lockin
+    
+    def get_pulse(self):
+        ''' getter for pulse params'''
+        return self._pulse
 
     def get_inputs(self):
         ''' getter for inputs of adwin'''
@@ -667,6 +736,26 @@ class Measure1D:
             
     def set_step(self, **kwargs):
         raise NotImplementedError('Step setting not implemented in 1D measurement!')
+    
+    def set_pulse(self, **kwargs):
+        ''' setter for pulse parameters '''
+        for key, val in kwargs.items():
+            if key in self._pulse:
+                match key:
+                    case 'name':
+                        log.error('Pulse name can not be changed! Only "vd" is supported!')
+                    case 'unit':
+                        log.error('Pulse unit can not be changed! Unit of "vd" is always "V"!')
+                    case 'amp' | 'rate' | 'wait_time' | 'delay_time':
+                        if isinstance(val, (int, float)):
+                            self._pulse[key] = val
+                        else:
+                            assert Exception(f'Value of {key} must be float or integer!')
+                    case 'traces':
+                        if all(trd in self.valids['traces'] for trd in val):
+                            self._pulse[key] = val
+            else:
+                raise SettingsError(f'Pulse has no var called {key}!')
 
     def set_wp_params(self, **kwargs):
         ''' setter for wp params'''
@@ -725,6 +814,7 @@ class Measure1D:
         self.save.add('sweep', self.get_sweep())
         # self.save.add('step', self.get_step())
         self.save.add('lockin', self.get_lockin())
+        self.save.add('pulse', self.get_pulse())
         self.save.add('inputs', self.get_inputs())
         self.save.add('plot', self.get_plot())
         self.save.add('save', self.get_save())
@@ -776,10 +866,12 @@ class Measure2D(Measure1D):
             return
         if start <= stop:
             steps = np.arange(start, stop + step, step, dtype=np.float32)
+            if steps[-1] > stop:
+                steps = steps[:-1]
         else:
             steps = np.arange(start, stop - step, -step, dtype=np.float32)
-        if steps[-1] > stop:
-            steps = steps[:-1]
+            if steps[-1] < stop:
+                steps = steps[:-1]
         self._step['values'] = steps
         log.info("Generated step values!")
 
@@ -867,11 +959,11 @@ class Measure2D(Measure1D):
                 )
 
     def save_config(self):
-        # super().save_config()
+        super().save_config()
         self.save.add('step', self.get_step())
 
     def start_measurement(self):
         ''' start activated measurement'''
-        # self.save_config()
-        self.tune.measure2D(self._plot, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+        self.save_config()
+        self.tune.measure2D(self._plot_dss, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
                             stop_event=self.stop_event)
