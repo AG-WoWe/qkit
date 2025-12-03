@@ -278,7 +278,7 @@ class Measure1D:
 
     def measure_trace(self):
         ''' measure trace and generate data dict'''
-        
+        log.info(self.wp_stop.outs)
         # sleep for wait_time if set up
         if self._sweep['wait_time']:
             time.sleep(self._sweep['wait_time'])
@@ -297,7 +297,6 @@ class Measure1D:
 
     def measure_retrace(self):
         ''' measure retrace and generate data dict'''
-        
         # sleep for wait_time if set up
         if self._sweep['wait_time']:
             time.sleep(self._sweep['wait_time'])
@@ -430,6 +429,16 @@ class Measure1D:
             sweep_time = max(sweep_time, duration)
         log.info(f"Sweeping to start point in {sweep_time:.1f}s!")
         self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
+######################### UGLY QUICKFIX ###############################################
+        # Wait for init time if 2D Measurement
+        try:
+            init_time = self._step['init_time']
+            if init_time:
+                log.info(f"Waiting at first step for init_time {init_time:.1f}s.")
+                time.sleep(init_time)
+        finally:
+            pass
+######################### UGLY QUICKFIX ###############################################
 
 # ------------------- Input creation & registration via tune -------------------
 
@@ -542,9 +551,18 @@ class Measure1D:
         self.wp_start.set(**self._wp_params)
         self.wp_stop.set(**self._wp_params)
         # set start and stop of sweep var
-        self.wp_start.set(**{self._sweep['name'] : self._sweep['start']})
-        self.wp_stop.set(**{self._sweep['name'] : self._sweep['stop']})
-
+        if self._sweep['name'] in self._wp_params:
+            self.wp_start.set(**{self._sweep['name'] : self._sweep['start']})
+            self.wp_stop.set(**{self._sweep['name'] : self._sweep['stop']})
+        # set start of step var
+################################## UGLY QUICK FIX ###################################
+        try:
+            if self._step['name'] in self._wp_params:
+                self.wp_start.set(**{self._step['name'] : self._step['start']})
+                self.wp_stop.set(**{self._step['name'] : self._step['start']})
+        finally:
+            pass
+################################## UGLY QUICK FIX ###################################
     def set_start_wp(self,**kwargs):
         ''' setter function for start working point of sweep'''
         self.wp_start.set(**kwargs)
@@ -873,14 +891,17 @@ class Measure2D(Measure1D):
             self._step['values'] = None
             return
         if start <= stop:
-            steps = np.arange(start, stop + step, step, dtype=np.float32)
+            steps = np.arange(start, stop + step, step)
+            print(start, stop, steps)
+            print(steps[-1])
             if steps[-1] > stop:
                 steps = steps[:-1]
+            print(start, stop, steps)
         else:
-            steps = np.arange(start, stop - step, -step, dtype=np.float32)
+            steps = np.arange(start, stop - step, -step)
             if steps[-1] < stop:
                 steps = steps[:-1]
-        self._step['values'] = steps
+        self._step['values'] = np.array(steps, dtype=np.float32)
         log.info("Generated step values!")
 
     def prepare_measurement_datasets(self):
@@ -918,8 +939,9 @@ class Measure2D(Measure1D):
             temp_wp_outs = self.wp_start.outs
         else:
             temp_wp_outs = self.wp_stop.outs
-        self.set_start_wp(**{self._step['name']: x})
-        self.set_stop_wp(**{self._step['name']: x})
+        if self._step['name'] in self._wp_params:     
+            self.set_start_wp(**{self._step['name']: x})
+            self.set_stop_wp(**{self._step['name']: x})
         # calculate duration to go to next wp
         dur = 0.01 # min duration values: if zero the sweep might not happen -> fix in driver?!
         for key, val in self.wp_start.outs.items():
