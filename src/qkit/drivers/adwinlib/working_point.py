@@ -79,12 +79,10 @@ class WorkingPoint():
             'cartesian': ['bx', 'by', 'bz'],
             'spherical': ['theta', 'phi', 'b'],
             'vector3d': ['theta', 'phi', 'psi', 'bt', 'bp', 'mode']}
-        # create list of all coords assosiated with the magnet
-        self._mcoords = list(set([item for val in self._magnetcoords.values() for item in val]))
         # set magnet
         if magnet is None:
             self._magnet = None
-        elif magnet in self._magnetcoords.keys():
+        elif magnet in self._magnetcoords:
             self._magnet = magnet
             for coord in self._magnetcoords[magnet]:
                 self._coords[coord] = nan
@@ -103,19 +101,16 @@ class WorkingPoint():
     def outs(self):
         ''' the outputs property '''
         match self._magnet:
-            case None:
-                outputs = {k: v for k, v in self._coords.items() if k not in self._mcoords}
-            case 'cartesian':
-                for coord in self._magnetcoords['cartesian']:
-                    outputs[coord] = self._coords[coord]
+            case None | 'cartesian':
+                outputs = self._coords
             case 'spherical':
                 # calc bx, by, bz and add to outputs
                 self.calc_cartesian_from_spherical()
-                outputs = {k: v for k, v in self._coords.items() if k not in self._mcoords}
+                outputs = {k: v for k, v in self._coords.items() if k not in self._magnetcoords['spherical']}
             case 'vector3d':
                 # calc bx, by, bz and add to outputs
                 self.calc_cartesian_from_vector3d()
-                outputs = {k: v for k, v in self._coords.items() if k not in self._mcoords}
+                outputs = {k: v for k, v in self._coords.items() if k not in self._magnetcoords['vector3d']}
         # check that all values are set
         if nan in outputs.values():
             raise UnderdefinedError
