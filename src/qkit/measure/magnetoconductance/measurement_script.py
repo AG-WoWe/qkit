@@ -1,11 +1,11 @@
-''' The measurement script is a class to describe and run
-    a 1D or 2D measurement, therefore several vars must be set.
-    These variables describe the working points (wp) to sweep between
-    during the measurement. Additional needed parameter is the mode
-    (normal/sweep) of the wp, more about this in the wp class.
-    The measurement can run with and without lockin signal,
-    if there should no lockin signal be applied, set no amplitude
-    or set amplitude to zero.
+''' The measurement script classes measure1D and measure2D are able to describe and run
+    1D or 2D measurements. Therefore several vars must be set. These variables describe
+    the working points (wp) to sweep between during the measurement.
+    For a 1D measurement (measure1D) only two wps are used, one for the start and one for the stop
+    of a sweep. For the 2D measurement (measure2D) these start and stop working point can change after
+    each sweep by stepping a parameter of the wps, creating a 2D map with step and sweep parameter.
+    The measurements can run with and without lockin signal, to disable the lockin its amplitude
+    needs to be set to zero.
 
     *Required keywords:
         -adwin:  *adwin instrument
@@ -14,19 +14,13 @@
     some vars vaulues are restricted to certain values,
     these are defined in the init of the class as valid values)
 
-        -sph:       *spherical coordinates and values for wp
-                    *phi, theta, psi, bp, bt
-                    *if a sph coordinate is used as step or sweep var
-                    it is not needed, because the value will be overwritten
-
-        -magnet:    *normal: direction determines the transverse field
-                             axis, and psi the sweep axis
-                    *sweep: direction determindes the sweep axis and psi
-                            the direction of the transverse field
-                    , sweep
-
-        -volts:     *source-drain and gate voltage
-                    *vd, vg
+        -wp_params: *including all parameters that are needed to define a wp
+                    *params of wp_params:
+                        +phi, theta, psi, bp, bt, mode (vector3d params)
+                        +vd, vg (bias and gate voltage)
+                    *more informations in WorkingPoint class
+                    *if a param is used as step or sweep var
+                     it is not needed, because the value will be overwritten
 
         -sweep:     *vars to generate virtual sweep values array
                     *name, start, stop, unit
@@ -37,25 +31,32 @@
                     *name, start, stop, stepsize, unit
                     *stop value is incuded in step values array
 
+        -lockin:    *vars for the lockin signal, must be set even if no lockin signal should be used,
+                     because of adwin driver (will be fixed later, for now set amplitude to zero for no lockin)
+                    *freq, amp, tao, init_time, (sample_rate), phase, maf
+
         -inputs:    *inputs to measure and return from adwin instrument
                     *raw, inph, quad (for "inph" and "quad" is a lockin signal required)
-                    *optional: retrace (default=False, describes if retrace is measured)
-                    *if "save" is set in data, needed outputs will be generated automatically
+                    *optional: retrace, difference (default=False, describes if retrace is measured/
+                    difference is calculated)
+                    *if "save" is set in data, needed inputs will be generated automatically
 
-        -data:      *vars that should be saved and plotted from the measurement
-                    *save: (traces, inputs); plot: (traces, inputs)
-                    *traces and inputs in "plot" will automatically be added to save,
-                    cause its required to save the data to plot it with qviewkit.
-                    *additional inputs: amp, phase (inph, quad needed for calculation)
+        -save:      *vars that should be saved from the measurement
+                    *traces (raw, inph, quad, amp, phase), inputs (trace, retrace, difference)
+
+        -plot:      *vars that should be plotted immediately from the measurement (same structure as "save")
+                    *traces and inputs in "plot" will automatically be added to "save",
+                     cause its required to save the data to plot it with qviewkit.
 
     *Optional keywords:
-        -h5_path:   *path of .h/hdf5 file to extract and load measurement config
-                     from previous measurement
+        -readout_freq:  *frequency for live-readout, if set to zero live-readout is disabled
+
+        -h5_path:       *path of .h/hdf5 file to extract and load measurement config
+                         from previous measurement
 
                      
-    *ToDo:  -static measurement:        *measurement without sweep or step
-            -interactive measurement:   *measurement with adwin communication while sweep
-            !!! B to zero, all to zero !!!
+    *ToDo:   
+        -B to zero, all to zero (can be done very easily manual)
 
 '''
 
@@ -89,7 +90,7 @@ def calc_theta(x, y):
 # ----------------------------- Base Class -------------------------------------
 
 class Measure1D:
-    """Base class that encapsulates common measurement logic.
+    """Base class for 1D measurements
 
     Subclasses must implement:
       - prepare_measurement_datasets()
@@ -159,6 +160,7 @@ class Measure1D:
         #               'wait_time': None}
         self._pulse = {'name': 'vd', 'amp': None, 'rate': None, 'unit': 'V',
                        'delay_time': 0.0, 'wait_time': 0.0, 'traces': []}
+        self._trigger = {'pulse': set(), 'sweep': set(), 'delay_time':0.0}
         self._lockin = {'freq': None, 'amp': None, 'tao': None,
                         'init_time': None, 'sample_rate': 500e3,
                         'phase': None, 'maf': None}
@@ -175,6 +177,7 @@ class Measure1D:
             'sweep': self.set_sweep,
             'step': self.set_step,
             'pulse': self.set_pulse,
+            'trigger': self.set_trigger,
             'lockin': self.set_lockin,
             'plot': self.set_plot,
             'save': self.set_save}
@@ -213,21 +216,25 @@ class Measure1D:
         ''' trigger trace sweep if live readout and initialize data dict'''
         self.trace = {}
         direction = 1
+        if 'trace' in self._trigger['pulse']:
+            self.adwin.send_trigger()
+        if 'trace' in self._pulse.get('traces', []):
+            time.sleep(self._pulse['delay_time'])
+            # pulse vd before trace measurement
+            pulse = self._pulse['name']
+            temp = self.wp_start.outs[pulse]
+            self.wp_start.set(**{pulse: self._pulse['amp']+temp})
+            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
+            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+            time.sleep(self._pulse['wait_time'])
+            self.wp_start.set(**{pulse: temp})
+            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+        if 'trace' in self._trigger['sweep']:
+            self.adwin.send_trigger()
+
         if self._sweep_readout_freq == 0:
             pass
         else:
-            if 'trace' in self._pulse.get('traces', []):
-                time.sleep(self._pulse['delay_time'])
-                # pulse vd before trace measurement
-                pulse = self._pulse['name']
-                temp = self.wp_start.outs[pulse]
-                self.wp_start.set(**{pulse: self._pulse['amp']+temp})
-                self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
-                self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-                time.sleep(self._pulse['wait_time'])
-                self.wp_start.set(**{pulse: temp})
-                self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-        
             self.adwin.sweep(self.wp_stop.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
 
@@ -235,21 +242,25 @@ class Measure1D:
         ''' trigger retrace sweep if live readout and initialize data dict'''
         self.retrace = {}
         direction = -1
+        if 'retrace' in self._trigger['pulse']:
+            self.adwin.send_trigger()
+        if 'retrace' in self._pulse.get('traces', []):
+            time.sleep(self._pulse['delay_time'])
+            # pulse vd before trace measurement
+            pulse = self._pulse['name']
+            temp = self.wp_stop.outs[pulse]
+            self.wp_stop.set(**{pulse: self._pulse['amp']+temp})
+            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
+            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+            time.sleep(self._pulse['wait_time'])
+            self.wp_stop.set(**{pulse: temp})
+            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
+        if 'retrace' in self._trigger['sweep']:
+            self.adwin.send_trigger()
+
         if self._sweep_readout_freq == 0:
             pass
         else:
-            if 'retrace' in self._pulse.get('traces', []):
-                time.sleep(self._pulse['delay_time'])
-                # pulse vd before trace measurement
-                pulse = self._pulse['name']
-                temp = self.wp_stop.outs[pulse]
-                self.wp_stop.set(**{pulse: self._pulse['amp']+temp})
-                self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
-                self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-                time.sleep(self._pulse['wait_time'])
-                self.wp_stop.set(**{pulse: temp})
-                self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-        
             self.adwin.sweep(self.wp_start.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
     
@@ -263,17 +274,6 @@ class Measure1D:
 
     def measure_trace(self):
         ''' measure trace and generate data dict'''
-        if 'trace' in self._pulse.get('traces', []) and self._sweep_readout_freq == 0:
-            time.sleep(self._pulse['delay_time'])
-            # pulse vd before trace measurement
-            pulse = self._pulse['name']
-            temp = self.wp_start.outs[pulse]
-            self.wp_start.set(**{pulse: self._pulse['amp']+temp})
-            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
-            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-            time.sleep(self._pulse['wait_time'])
-            self.wp_start.set(**{pulse: temp})
-            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
         
         # sleep for wait_time if set up
         if self._sweep['wait_time']:
@@ -293,17 +293,6 @@ class Measure1D:
 
     def measure_retrace(self):
         ''' measure retrace and generate data dict'''
-        if 'retrace' in self._pulse.get('traces', []) and self._sweep_readout_freq == 0:
-            time.sleep(self._pulse['delay_time'])
-            # pulse vd before retrace measurement
-            pulse = self._pulse['name']
-            temp = self.wp_stop.outs[pulse]
-            self.wp_stop.set(**{pulse: self._pulse['amp']+temp})
-            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
-            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-            time.sleep(self._pulse['wait_time'])
-            self.wp_stop.set(**{pulse: temp})
-            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
         
         # sleep for wait_time if set up
         if self._sweep['wait_time']:
@@ -691,6 +680,10 @@ class Measure1D:
         ''' getter for pulse params'''
         return self._pulse
 
+    def get_trigger(self):
+        ''' getter for save dict'''
+        return {pos: list(traces) for pos, traces in self._trigger.items()}
+    
     def get_inputs(self):
         ''' getter for inputs of adwin'''
         return self._inputs
@@ -770,6 +763,17 @@ class Measure1D:
                     self._wp_params[key] = val
                 else:
                     assert Exception(f'Value of {key} must be float or integer!')
+
+    def set_trigger(self, **kwargs):
+        ''' setter for trigger dict'''
+        for pos, traces in kwargs.items():
+            if pos in self.valids['trigger']:
+                if all(trd in self.valids['traces'] for trd in traces):
+                    self._save[pos] = traces
+                else:
+                    log.error(f'Not all "traces" in {traces} are allowed.')
+            else:
+                log.error(f'Position variable {pos} is not available for trigger.')
 
     def set_lockin(self, **kwargs):
         ''' setter for lockin params'''
