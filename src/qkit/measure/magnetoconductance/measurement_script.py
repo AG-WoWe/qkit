@@ -217,6 +217,7 @@ class Measure1D:
         self.trace = {}
         direction = 1
         if 'trace' in self._trigger['pulse']:
+            time.sleep(self._trigger['delay_time'])
             self.adwin.send_trigger()
         if 'trace' in self._pulse.get('traces', []):
             time.sleep(self._pulse['delay_time'])
@@ -230,6 +231,7 @@ class Measure1D:
             self.wp_start.set(**{pulse: temp})
             self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
         if 'trace' in self._trigger['sweep']:
+            time.sleep(self._trigger['delay_time'])
             self.adwin.send_trigger()
 
         if self._sweep_readout_freq == 0:
@@ -243,6 +245,7 @@ class Measure1D:
         self.retrace = {}
         direction = -1
         if 'retrace' in self._trigger['pulse']:
+            time.sleep(self._trigger['delay_time'])
             self.adwin.send_trigger()
         if 'retrace' in self._pulse.get('traces', []):
             time.sleep(self._pulse['delay_time'])
@@ -256,6 +259,7 @@ class Measure1D:
             self.wp_stop.set(**{pulse: temp})
             self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
         if 'retrace' in self._trigger['sweep']:
+            time.sleep(self._trigger['delay_time'])
             self.adwin.send_trigger()
 
         if self._sweep_readout_freq == 0:

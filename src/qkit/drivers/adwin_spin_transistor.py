@@ -109,6 +109,7 @@ REPORT_DURATION = 12   # Read: (FPAr) Duration of the sweep (s)
 SWEEP_TARGET = 11      # Set: (Data (Long)) Target output of sweep (bit)
 
 # RESULTING FROM ADBASIC FILES
+TRIGGER_PAR = 30
 OUT1_PAR= LOCKIN_CARD * 10 + 1 #The first output for card 3 is Par_31
 MIN_FREQUENCY = 62.48
 MAX_FREQUENCY = 40E3 # too high frequency might suffer from jitter
@@ -130,6 +131,7 @@ class adwin_spin_transistor(Instrument):
         lockin_filter='maf_1stageLP', # maf_1stageLP or 4stageLP
         devicenumber=1,
         bootload=True,
+        trigger=False,
         hard_config=None,
         soft_config=None):
 
@@ -151,6 +153,8 @@ class adwin_spin_transistor(Instrument):
         self._sample_rate = None
         self._lockin_amp = None
         self._inputs = []
+        self._trigger = trigger
+
 
         # Set 'bootload' to 'False' to not reboot the Adwin.
         if bootload:
@@ -178,6 +182,11 @@ class adwin_spin_transistor(Instrument):
 ########################################################################
 ####################### MEASUREMENT ROUTINES ###########################
 ########################################################################
+
+    def send_trigger(self):
+        """ Set trigger val"""
+        log.info('Adwin set trigger.')
+        self.adw.Set_Par(TRIGGER_PAR, 1)
 
     def sweep(self, target, duration, wait=True, clearFIFO=True):
         """ Ramp the outputs of the ADwin wihtout measurement.
@@ -580,6 +589,7 @@ class adwin_spin_transistor(Instrument):
 
         lockin_fname = f'Pro2_T11T12_lockin_{lockin_filter}.{ext}1'
         sweep_fname = f'Pro2_T11T12_sweep.{ext}2'
+        trigger_fname = f'Pro2_T11T12_trigger.{ext}3'
 
         lockin_process = adbasic_dir / lockin_fname
         log.info('Adwin loading: %s', lockin_process.name)
@@ -587,6 +597,11 @@ class adwin_spin_transistor(Instrument):
         sweep_process = adbasic_dir / sweep_fname
         log.info('Adwin loading: %s', sweep_process.name)
         self.adw.Load_Process(str(sweep_process))
+
+        if self._trigger:
+            trigger_process = adbasic_dir / trigger_fname
+            log.info('Adwin loading: %s', trigger_process.name)
+            self.adw.Load_Process(str(trigger_process))
 
         self._state = 'processes_loaded'
 
