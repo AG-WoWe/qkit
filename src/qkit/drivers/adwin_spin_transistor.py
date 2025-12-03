@@ -153,12 +153,10 @@ class adwin_spin_transistor(Instrument):
         self._sample_rate = None
         self._lockin_amp = None
         self._inputs = []
-        self._trigger = trigger
-
 
         # Set 'bootload' to 'False' to not reboot the Adwin.
         if bootload:
-            self._bootload(processor, lockin_filter)
+            self._bootload(processor, lockin_filter, trigger)
         else:
             firmware, version = self._read_adwin_firmware()
             if firmware != 'SPIN-TRANSISTOR':
@@ -528,7 +526,7 @@ class adwin_spin_transistor(Instrument):
             log.warning(msg)
             return(None, None)
 
-    def _bootload(self, processor, lockin_filter):
+    def _bootload(self, processor, lockin_filter, trigger):
         # before boot try to read the current outputs, which can
         # fail if the adwin was power cycled and never booted since
         firmware, version = self._read_adwin_firmware()
@@ -598,10 +596,11 @@ class adwin_spin_transistor(Instrument):
         log.info('Adwin loading: %s', sweep_process.name)
         self.adw.Load_Process(str(sweep_process))
 
-        if self._trigger:
+        if trigger:
             trigger_process = adbasic_dir / trigger_fname
             log.info('Adwin loading: %s', trigger_process.name)
             self.adw.Load_Process(str(trigger_process))
+            self.adw.Start_Process(3)
 
         self._state = 'processes_loaded'
 
