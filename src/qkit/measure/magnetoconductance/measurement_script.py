@@ -108,6 +108,7 @@ class Measure1D:
             'step': {'vg', 'vd', 'N', 'bt', 'bp', 'phi', 'psi', 'theta'},
             'sweep': {'vg', 'vd', 'bt', 'bp', 'phi', 'psi', 'theta', 'time'},
             'mode': {'normal', 'sweep'},
+            'trigger': {'traces', 'pre_delay', 'post_delay'},
             'traces': {'trace', 'retrace', "difference"},
             'inputs': {'raw', 'inph', 'quad'},
             'calc': {'amp': ['inph', 'quad'], 'phase': ['inph', 'quad']},
@@ -159,8 +160,8 @@ class Measure1D:
         #               'step_size': None, 'values': None, 'init_time': None,
         #               'wait_time': None}
         self._pulse = {'name': 'vd', 'amp': None, 'rate': None, 'unit': 'V',
-                       'delay_time': 0.0, 'wait_time': 0.0, 'traces': []}
-        self._trigger = {'pulse': set(), 'sweep': set(), 'delay_time':0.0}
+                       'pre_delay': 0.0, 'pulse_duration': 0.0, 'post_delay': 0.0, 'traces': set()}
+        self._trigger = {'traces': [], 'pre_delay':0.0, 'post_delay':0.0}
         self._lockin = {'freq': None, 'amp': None, 'tao': None,
                         'init_time': None, 'sample_rate': 500e3,
                         'phase': None, 'maf': None}
@@ -211,29 +212,41 @@ class Measure1D:
 
 
     # ----------------------- Trigger functions -----------------------
+    def send_trigger(self):
+        ''' send trigger to adwin'''
+        time.sleep(self._trigger['pre_delay'])
+        self.adwin.send_trigger()
+        time.sleep(self._trigger['post_delay'])
+
+    def send_pulse(self):
+        ''' perform pulse on pulse var'''
+        log.info("Sending pulse...")
+        time.sleep(self._pulse['pre_delay'])
+        # save current value of pulse var
+        temp = self.wp_start.outs[self._pulse['name']]
+        # sweep to pulse value (amp + temp)
+        self.wp_start.set(**{self._pulse['name']: self._pulse['amp']+temp})
+        duration = self._pulse['amp'] / self._pulse['rate']
+        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
+        # wait for pulse duration
+        time.sleep(self._pulse['pulse_duration'])
+        # sweep back to temp value
+        self.wp_start.set(**{self._pulse['name']: temp})
+        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
 
     def trigger_trace(self):
         ''' trigger trace sweep if live readout and initialize data dict'''
         self.trace = {}
         direction = 1
-        if 'trace' in self._trigger['pulse']:
-            time.sleep(self._trigger['delay_time'])
-            self.adwin.send_trigger()
-        if 'trace' in self._pulse.get('traces', []):
-            time.sleep(self._pulse['delay_time'])
-            # pulse vd before trace measurement
-            pulse = self._pulse['name']
-            temp = self.wp_start.outs[pulse]
-            self.wp_start.set(**{pulse: self._pulse['amp']+temp})
-            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
-            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-            time.sleep(self._pulse['wait_time'])
-            self.wp_start.set(**{pulse: temp})
-            self.adwin.sweep(self.wp_start.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-        if 'trace' in self._trigger['sweep']:
-            time.sleep(self._trigger['delay_time'])
-            self.adwin.send_trigger()
 
+        # pulse vd before trace measurement
+        if 'trace' in self._pulse.get('traces', []):
+            self.send_pulse()
+        # trigger AWG before sweep
+        if 'trace' in self._trigger['traces']:
+            self.send_trigger()
+
+        # trigger sweep if live readout
         if self._sweep_readout_freq == 0:
             pass
         else:
@@ -244,24 +257,15 @@ class Measure1D:
         ''' trigger retrace sweep if live readout and initialize data dict'''
         self.retrace = {}
         direction = -1
-        if 'retrace' in self._trigger['pulse']:
-            time.sleep(self._trigger['delay_time'])
-            self.adwin.send_trigger()
-        if 'retrace' in self._pulse.get('traces', []):
-            time.sleep(self._pulse['delay_time'])
-            # pulse vd before trace measurement
-            pulse = self._pulse['name']
-            temp = self.wp_stop.outs[pulse]
-            self.wp_stop.set(**{pulse: self._pulse['amp']+temp})
-            self._pulse['duration'] = self._pulse['amp'] / self._pulse['rate']
-            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-            time.sleep(self._pulse['wait_time'])
-            self.wp_stop.set(**{pulse: temp})
-            self.adwin.sweep(self.wp_stop.outs, duration=self._pulse['duration'], wait=True, clearFIFO=True)
-        if 'retrace' in self._trigger['sweep']:
-            time.sleep(self._trigger['delay_time'])
-            self.adwin.send_trigger()
 
+        # pulse vd before retrace measurement
+        if 'retrace' in self._pulse.get('traces', []):
+            self.send_pulse()
+        # trigger AWG before sweep
+        if 'retrace' in self._trigger['traces']:
+            self.send_trigger()
+
+        # trigger sweep if live readout
         if self._sweep_readout_freq == 0:
             pass
         else:
@@ -278,7 +282,6 @@ class Measure1D:
 
     def measure_trace(self):
         ''' measure trace and generate data dict'''
-        log.info(self.wp_stop.outs)
         # sleep for wait_time if set up
         if self._sweep['wait_time']:
             time.sleep(self._sweep['wait_time'])
@@ -427,18 +430,8 @@ class Measure1D:
         for key, val in self.wp_start.outs.items():
             duration = abs(val - outs_start[key]) / self.valids['maxrate'][key]
             sweep_time = max(sweep_time, duration)
-        log.info(f"Sweeping to start point in {sweep_time:.1f}s!")
+        log.info(f"Sweeping to start point in {sweep_time:.3f}s!")
         self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
-######################### UGLY QUICKFIX ###############################################
-        # Wait for init time if 2D Measurement
-        try:
-            init_time = self._step['init_time']
-            if init_time:
-                log.info(f"Waiting at first step for init_time {init_time:.1f}s.")
-                time.sleep(init_time)
-        finally:
-            pass
-######################### UGLY QUICKFIX ###############################################
 
 # ------------------- Input creation & registration via tune -------------------
 
@@ -541,7 +534,10 @@ class Measure1D:
     def end_measurement(self):
         ''' end measurement'''
         self.adwin.stop_measurement()
-        self.tune._qvk_process.terminate()
+        try:
+            self.tune._qvk_process.terminate()
+        except Exception as e:
+            log.warning(f"Failed to terminate qvk process: {e}")
 
     # ----------------------- Working points -----------------------
 
@@ -554,15 +550,7 @@ class Measure1D:
         if self._sweep['name'] in self._wp_params:
             self.wp_start.set(**{self._sweep['name'] : self._sweep['start']})
             self.wp_stop.set(**{self._sweep['name'] : self._sweep['stop']})
-        # set start of step var
-################################## UGLY QUICK FIX ###################################
-        try:
-            if self._step['name'] in self._wp_params:
-                self.wp_start.set(**{self._step['name'] : self._step['start']})
-                self.wp_stop.set(**{self._step['name'] : self._step['start']})
-        finally:
-            pass
-################################## UGLY QUICK FIX ###################################
+
     def set_start_wp(self,**kwargs):
         ''' setter function for start working point of sweep'''
         self.wp_start.set(**kwargs)
@@ -616,6 +604,10 @@ class Measure1D:
         # first add all plot traces to save dict
         for meas, traces in self._plot.items():
             self._save[meas].update(traces)
+        # add trace and retrace to save dict if difference is requested
+        for meas, traces in self._save.items():
+            if traces == 'difference':
+                self._save[meas].update({'trace', 'retrace'})
         # then generate temp dict from save dict
         for meas, traces in self._save.items():
             if traces:
@@ -697,14 +689,16 @@ class Measure1D:
     def get_lockin(self):
         ''' getter for lockin params'''
         return self._lockin
-    
+
     def get_pulse(self):
         ''' getter for pulse params'''
-        return self._pulse
+        return {k: list(v) if isinstance(v, set) else v
+                for k, v in self._pulse.items()}
 
     def get_trigger(self):
         ''' getter for save dict'''
-        return {pos: list(traces) for pos, traces in self._trigger.items()}
+        return {k: list(v) if isinstance(v, set) else v
+                for k, v in self._trigger.items()}
     
     def get_inputs(self):
         ''' getter for inputs of adwin'''
@@ -748,7 +742,13 @@ class Measure1D:
                         self._sweep['wait_time'] = val
             else:
                 raise SettingsError
-            
+
+        # override wp_params with sweep start value
+        if self._sweep['name'] in self._wp_params:
+            log.info(f"Override wp_param {self._sweep['name']} = {self._wp_params[self._sweep['name']]} with sweep start value {self._sweep['start']}")
+            self._wp_params[self._sweep['name']] = self._sweep['start']
+        
+
     def set_step(self, **kwargs):
         raise NotImplementedError('Step setting not implemented in 1D measurement!')
     
@@ -788,14 +788,19 @@ class Measure1D:
 
     def set_trigger(self, **kwargs):
         ''' setter for trigger dict'''
-        for pos, traces in kwargs.items():
-            if pos in self.valids['trigger']:
-                if all(trd in self.valids['traces'] for trd in traces):
-                    self._save[pos] = traces
+        for key, val in kwargs.items():
+            if key == 'traces':
+                if all(trd in self.valids['traces'] for trd in val):
+                    self._trigger[key] = val
                 else:
-                    log.error(f'Not all "traces" in {traces} are allowed.')
+                    log.error(f'Not all "traces" in {val} are allowed.')
+            elif key in self.valids['trigger']:
+                if isinstance(val, (int, float)):
+                    self._trigger[key] = val
+                else:
+                    log.error(f'Value of {key} must be float or integer!')
             else:
-                log.error(f'Position variable {pos} is not available for trigger.')
+                log.error(f'{key} is no available parameter for trigger.')
 
     def set_lockin(self, **kwargs):
         ''' setter for lockin params'''
@@ -910,7 +915,6 @@ class Measure2D(Measure1D):
 
     def set_step(self, **kwargs):
         ''' setter for step parameters'''
-        print("Setting step parameters...")
         for key, val in kwargs.items():
             if key in self._step:
                 match key:
@@ -928,18 +932,42 @@ class Measure2D(Measure1D):
                         else:
                             log.info(f'Skip setting step param {key} with value {val}!')
                             log.error(f'Value of {key} must be float or integer!')
+        
+        # override wp_params with step start value
+        if self._step['name'] in self._wp_params:
+            log.info(f"Override wp_param {self._step['name']} = {self._wp_params[self._step['name']]} with step start value {self._step['start']}")
+            self._wp_params[self._step['name']] = self._step['start']
 
     def get_step(self):
         ''' getter for step vars'''
         return {k: v for k, v in self._step.items() if k != 'values'}
-                        
+
+    def init_wps(self):
+        ''' Initialize start and stop working points for map '''
+        super().init_wps()
+        # set start of step var
+        if self._step['name'] in self._wp_params:
+            self.wp_start.set(**{self._step['name'] : self._step['start']})
+            self.wp_stop.set(**{self._step['name'] : self._step['start']})
+
+    def sweep_to_startpoint(self):
+        ''' start sweep from adwin outputs to the first wp of the measurement'''
+        super().sweep_to_startpoint()
+        # Wait for init time at first step
+        try:
+            init_time = self._step['init_time']
+            log.info(f"Waiting at first step for init_time {init_time:.2f}s.")
+            time.sleep(init_time)
+        except:
+            assert Exception("No init_time set in step parameters!")
+
     def wp_setter(self, x=None):
         ''' set new step val of step var for wp'''
         if self._inputs['retrace']:
             temp_wp_outs = self.wp_start.outs
         else:
             temp_wp_outs = self.wp_stop.outs
-        if self._step['name'] in self._wp_params:     
+        if self._step['name'] in self._wp_params:
             self.set_start_wp(**{self._step['name']: x})
             self.set_stop_wp(**{self._step['name']: x})
         # calculate duration to go to next wp
