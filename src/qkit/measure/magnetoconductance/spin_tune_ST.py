@@ -47,6 +47,8 @@ class Tuning_ST(Tuning):
                 sweep_samples = 0       # init sample counter
                 # perform readouts during sweep until all samples are acquired
                 while sweep_samples < len(self._x_parameter.values):
+                    # wait (readout_dur) seconds until readout
+                    sleep(readout_dur)
                     # Get latest data from measurement
                     latest_data = self.multiplexer.measure_with_index(i)
                     if latest_data:
@@ -83,8 +85,6 @@ class Tuning_ST(Tuning):
                         for key in latest_data:
                             self._append_vector({key: [nan]*(len(self._x_parameter.values)-sweep_samples)}, self._datasets, direction = 1)
                         break
-                    # wait (readout_dur) seconds until next readout
-                    sleep(readout_dur)
                     
         finally:
             self.watchdog.reset()
@@ -147,6 +147,7 @@ class Tuning_ST(Tuning):
                     
                     # perform readouts during sweep until all samples are acquired
                     while sweep_samples < len(self._y_parameter.values):
+                            sleep(readout_dur)      # wait between readouts
                             # Get latest data from measurement
                             latest_data = self.multiplexer.measure_with_index(i)
                             if latest_data:
@@ -179,7 +180,6 @@ class Tuning_ST(Tuning):
                                 for key in latest_data:
                                     self._append_vector({key: [nan]*(len(self._x_parameter.values)-sweep_samples)}, self._datasets, direction = 1, pointwise=True)
                                 break
-                            sleep(readout_dur)      # wait between readouts
 
         finally:
             self.watchdog.reset()
