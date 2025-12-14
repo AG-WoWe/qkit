@@ -905,15 +905,22 @@ class Measure2D(Measure1D):
             return
         if start <= stop:
             steps = np.arange(start, stop + step, step)
-            print(start, stop, steps)
-            print(steps[-1])
             if steps[-1] > stop:
-                steps = steps[:-1]
-            print(start, stop, steps)
+                if (stop*1.05) > steps[-1]:
+                    steps = np.linspace(start, stop, len(steps))
+                    log.info("Recalculated step values for correct stop value!")
+                else:
+                    steps = steps[:-1]
+                    log.warning("Removed last step value!")
         else:
             steps = np.arange(start, stop - step, -step)
             if steps[-1] < stop:
-                steps = steps[:-1]
+                if (stop*1.05) < steps[-1]:
+                    steps = np.linspace(start, stop, len(steps))
+                    log.info("Recalculated step values for correct stop value!")
+                else:
+                    steps = steps[:-1]
+                    log.warning("Removed last step value!")
         self._step['values'] = np.array(steps, dtype=np.float32)
         log.info("Generated step values!")
 
