@@ -335,6 +335,14 @@ class Measure1D:
                           temp.get(f'{args[1]}_{trace}'))
                     if isinstance(calcs, np.ndarray):
                         temp[f'{meas}_{trace}'] = calcs
+        
+        # correct len (for live-readout)
+        samples = len(self._sweep['values'])
+        for meas, traces in self._save.items():
+            index = len(temp[f'{meas}_{traces}']) - samples
+            if index < 0 and index >= -3:
+                temp[f'{meas}_{traces}'] = np.append(temp[f'{meas}_{traces}'], [temp[f'{meas}_{traces}'][-1]] * abs(index))
+        
         # save temp saves for difference calculations
         match trace:
             case 'trace':
