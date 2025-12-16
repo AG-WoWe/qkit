@@ -4,8 +4,8 @@ default_hard_config = {
             'no_output_channels': 8,
             'outputs': {
                 'bx': {'card': 3, 'channel': 1, 'scale': 0.995, 'unit': 'T', 'bits':16},
-                'by': {'card': 3, 'channel': 3, 'scale': 0.945, 'unit': 'T', 'bits':16},
-                'bz': {'card': 3, 'channel': 5, 'scale': 1.265, 'unit': 'T', 'bits':16},
+                'by': {'card': 3, 'channel': 2, 'scale': 0.945, 'unit': 'T', 'bits':16},
+                'bz': {'card': 3, 'channel': 3, 'scale': 1.265, 'unit': 'T', 'bits':16},
                 'vg': {'card': 3, 'channel': 7, 'scale': 10, 'unit': 'V', 'bits':16},
                 'vd': {'card': 3, 'channel': 8, 'scale': 10, 'unit': 'V', 'bits':16}
                 },
@@ -15,7 +15,7 @@ default_hard_config = {
             }
         # between measurement 'switchable' configuration of adwin accessories 
 default_soft_config = {
-            'vdivs': {'vg':0.5, 'vd':0.01},
-            'iv_gain': {'id':1e8},
+            'vdivs': {'vg':0.1, 'vd':0.001},
+            'iv_gain': {'id':1e9},
             'readout_channel': 'id'
         }
