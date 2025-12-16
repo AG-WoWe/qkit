@@ -34,8 +34,7 @@ dependencies = [
     "packaging",
     "filelock>=3.17",
     "tqdm>=4.67.0",
-    "matplotlib>=3.5.0",
-    "distutils"
+    "matplotlib>=3.5.0"
 ]
 
 [project.scripts]
