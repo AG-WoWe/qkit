@@ -134,6 +134,9 @@ class hdf_dataset(object):
                                              dim = self.dim,
                                              ds_type = self.ds_type,
                                              dtype = self.dtype)
+                                            #  **self.meta)
+                                             
+            # print("Meta contents:", self.meta)
             self._setup_metadata()
             if self._save_timestamp:
                 self._create_timestamp_ds()
