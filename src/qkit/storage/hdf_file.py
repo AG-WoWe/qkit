@@ -240,19 +240,20 @@ class H5_file(object):
             ## multiple inputs: list/np.array with one or multiple entries
             fill = ds.attrs.get('fill')
             dim1 = ds.shape[1]
-            if len(data) == 1 and pointwise:
+            # allow appending to the innermost dimension for len(data)>=1 by using pointwise=True
+            if pointwise:
                 dim0 = max(1, ds.shape[0])
-                ## single entry; sorting like in the 'len(ds.shape) == 3' case
                 if next_matrix:
+                    ## start a new row in the matrix
                     dim0 += 1
                     fill[0] += 1
                     fill[1] = 0
                 if dim0 == 1: # very first slice
                     fill[0] = 1
-                    dim1 += 1
+                    dim1 += len(data)
                 ds.resize((dim0,dim1))
-                fill[1] += 1
-                ds[fill[0]-1,fill[1]-1] = data
+                fill[1] += len(data)
+                ds[fill[0]-1, fill[1]-len(data):fill[1]] = data
             else: 
                 ## list of entries, sort the data 'slice by slice'
                 dim0 = ds.shape[0]

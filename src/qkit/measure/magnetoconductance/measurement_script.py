@@ -1,72 +1,82 @@
-''' The measurement script is a class to describe and run
-    a 1D or 2D measurement, therefore several vars must be set.
-    These variables describe the working points (wp) to sweep between
-    during the measurement. Additional needed parameter is the mode
-    (normal/sweep) of the wp, more about this in the wp class.
-    The measurement can run with and without lockin signal,
-    if there should no lockin signal be applied, set no amplitude
-    or set amplitude to zero.
+''' The measurement script classes measure1D and measure2D are able to describe and run
+    1D or 2D measurements. Therefore several vars must be set. These variables describe
+    the working points (wp) to sweep between during the measurement.
+    For a 1D measurement (measure1D) only two wps are used, one for the start and one for the stop
+    of a sweep. For the 2D measurement (measure2D) these start and stop working point can change after
+    each sweep by stepping a parameter of the wps, creating a 2D map with step and sweep parameter.
+    The measurements can run with and without lockin signal, to disable the lockin its amplitude
+    needs to be set to zero.
 
     *Required keywords:
-        -anna:  *adwin instrument
+        -adwin:  *adwin instrument
 
     (all below listed variables are saved as dictionaries,
     some vars vaulues are restricted to certain values,
     these are defined in the init of the class as valid values)
 
-        -sph:       *spherical coordinates and values for wp
-                    *phi, theta, psi, bp, bt
-                    *if a sph coordinate is used as step or sweep var
-                    it is not needed, because the value will be overwritten
-
-        -modes:     *mode of wp and measure mode
-                    *wp: normal, sweep; measure: sweep, static
-                    *the "static" measure mode is not yet implemented!
-
-        -volts:     *source-drain and gate voltage
-                    *vd, vg
+        -wp_params: *including all parameters that are needed to define a wp
+                    *params of wp_params:
+                        +phi, theta, psi, bp, bt, mode (vector3d params)
+                        +vd, vg (bias and gate voltage)
+                    *more informations in WorkingPoint class
+                    *if a param is used as step or sweep var
+                     it is not needed, because the value will be overwritten
 
         -sweep:     *vars to generate virtual sweep values array
                     *name, start, stop, unit
                     *optional: rate, duration
-                    *if no rate or duration is set, max_rate_config of sweep var will be used
+                    *if no rate or duration is set, valids['maxrate'] of sweep var will be used
 
         -step:      *vars to generate step values array (only needed for 2D measurement)
                     *name, start, stop, stepsize, unit
                     *stop value is incuded in step values array
 
+        -lockin:    *vars for the lockin signal, must be set even if no lockin signal should be used,
+                     because of adwin driver (will be fixed later, for now set amplitude to zero for no lockin)
+                    *freq, amp, tao, init_time, (sample_rate), phase, maf
+
         -inputs:    *inputs to measure and return from adwin instrument
                     *raw, inph, quad (for "inph" and "quad" is a lockin signal required)
-                    *optional: retrace (default=False, describes if retrace is measured)
-                    *if "save" is set in data, needed outputs will be generated automatically
+                    *optional: retrace, difference (default=False, describes if retrace is measured/
+                    difference is calculated)
+                    *if "save" is set in data, needed inputs will be generated automatically
 
-        -data:      *vars that should be saved and plotted from the measurement
-                    *save: (traces, inputs); plot: (traces, inputs)
-                    *traces and inputs in "plot" will automatically be added to save,
-                    cause its required to save the data to plot it with qviewkit.
-                    *additional inputs: amp, phase (inph, quad needed for calculation)
+        -save:      *vars that should be saved from the measurement
+                    *traces (raw, inph, quad, amp, phase), inputs (trace, retrace, difference)
+
+        -plot:      *vars that should be plotted immediately from the measurement (same structure as "save")
+                    *traces and inputs in "plot" will automatically be added to "save",
+                     cause its required to save the data to plot it with qviewkit.
 
     *Optional keywords:
-        -h5_path:   *path of .h/hdf5 file to extract and load measurement config
-                     from previous measurement
+        -readout_freq:  *frequency for live-readout, if set to zero live-readout is disabled
+
+        -h5_path:       *path of .h/hdf5 file to extract and load measurement config
+                         from previous measurement
 
                      
-    *ToDo:  -static measurement:        *measurement without sweep or step
-            -interactive measurement:   *measurement with adwin communication while sweep
-            !!! B to zero, all to zero !!!
+    *ToDo:   
+        -B to zero, all to zero (can be done very easily manual)
 
 '''
-#imports
-import logging as log
-import numpy as np
+
+import tkinter as tk
+import threading
 import json
 import time
+import logging as log
+import numpy as np
 import h5py
-import qkit
 from qkit.measure.magnetoconductance.spin_tune_ST import Tuning_ST
-from qkit.measure.magnetoconductance.working_point import WorkingPoint
+from qkit.drivers.adwinlib.working_point import WorkingPoint
 from qkit.drivers.adwin_spin_transistor import adwin_spin_transistor
+from qkit.drivers.adwin_spin_transistor_virtual import adwin_spin_transistor_virtual
 
+
+# ----------------------------- Utilities & Errors -----------------------------
+
+class SettingsError(Exception):
+    """Raise Error if settings for Measurement script are invalid"""
 
 def calc_r(x, y):
     ''' calc func for amplitude from lockin'''
@@ -76,652 +86,949 @@ def calc_theta(x, y):
     ''' calc func for phase shift from lockin'''
     return np.arctan2(y, x)
 
-class MeasurementScript():
-    ''' The Measurement Script generates a 
-    measurement routine with given params'''
 
-    def __init__(self, adwin:adwin_spin_transistor,
-                 h5_path=None, **kwargs):
-        self.def_valids()   # define valid inputs for params
-        self.setup_params() # setup needed measurement params
-        self.def_setter()   # define params setter funcs
+# ----------------------------- Base Class -------------------------------------
 
-        # load measurement params from h5file
+class Measure1D:
+    """Base class for 1D measurements
+
+    Subclasses must implement:
+      - prepare_measurement_datasets()
+      - set_parameter()
+      - add_view()
+      - start_measurement()
+
+    Optional (override if needed):
+      - generate_steps()  (only for 2D)
+    """
+
+    def __init__(self, adwin: adwin_spin_transistor|adwin_spin_transistor_virtual, readout_freq = 0, h5_path: str | None = None, **kwargs):
+        # Valid maps & limits
+        self.valids = {
+            'step': {'vg', 'vd', 'N', 'bt', 'bp', 'phi', 'psi', 'theta'},
+            'sweep': {'vg', 'vd', 'bt', 'bp', 'phi', 'psi', 'theta', 'time'},
+            'mode': {'normal', 'sweep'},
+            'trigger': {'traces', 'pre_delay', 'post_delay'},
+            'traces': {'trace', 'retrace', "difference"},
+            'inputs': {'raw', 'inph', 'quad'},
+            'calc': {'amp': ['inph', 'quad'], 'phase': ['inph', 'quad']},
+            'calc_func': {'amp': calc_r, 'phase': calc_theta},
+            'maxrate': {'bx': 0.3, 'by': 0.3, 'bz': 0.3, 'bp': 0.3,
+                        'bt': 0.3, 'vg': 0.1, 'vd': 0.1, 'time': 1e6},
+            'unit': {'inph': 'S', 'quad': 'S', 'raw': 'I', 'amp': 'S', 'phase': 'rad'},
+        }
+
+        self.setup_params()
+        self.def_setter()
+
+        # Load config from h5 file if path given
         if h5_path is not None:
             self.load_config(h5_path)
+        # Set readout frequency for sweep (default: 0 -> readout after sweep finished)
+        self._sweep_readout_freq = readout_freq
+        # Allow passing dicts like sweep= {...}, step={...}, etc.
+        self.set(**kwargs)
 
-        self.set_(**kwargs) # set imported param values
-
-        self.anna = adwin    # connect ADwin instrument
-
-        self.update_script()    # generate measurement routine
-
-    def def_valids(self):
-        ''' define validations'''
-        self.valid_step_vars = ['vg','vd','N','bt','bp','phi','psi','theta']
-        self.valid_sweep_vars = ['vg','vd','bt','bp','phi','psi','theta']
-        self.valid_wp_mode = ['normal','sweep']
-        self.valid_measure_mode = ['static','sweep']        # static mode not availible yet
-        self.valid_inputs = ['raw','inph','quad']
-        self.valid_traces = ['trace','retrace','difference']
-        self.valid_calc = ['amp','phase']
-        self.max_rate_config = {'bx':0.1,'by':0.1,'bz':0.1,'bp':0.1,'bt':0.1,'vg':0.1,'vd':0.1} # rate in T(/V) per sec
-        self.unit = {'inph':'S','quad':'S','raw':'V','amp':'S','phase':'rad'}
-        self.valids = {'step':self.valid_step_vars,'sweep':self.valid_sweep_vars,
-                        'wp':self.valid_wp_mode,'measure':self.valid_measure_mode,
-                        'traces':self.valid_traces,'inputs':self.valid_inputs,
-                        'calc':self.valid_calc,'maxrate':self.max_rate_config}
-
-    def setup_params(self):
-        ''' setup params for the measurement'''
-        self._sph = {'theta': 0, 'phi': 0, 'psi': 0, 'bp': 0, 'bt': 0}
-        self._sweep = {'name':None,'start':None,'stop':None,'unit':None,
-                        'rate':None,'duration':None,'values':None}
-        self._step = {'name':None,'start':None,'stop':None,'unit':None,
-                        'step_size':None,'values':None}
-        self._modes = {'wp':None,'measure':None}
-        self._volts = {'vd':None,'vg':None}
-        self._lockin = {'freq':None,'amp':None,'tao':None,'init_time':None,'sample_rate':500e3}
-        self._inputs = {'retrace':False,'inputs':[]}
-        self._data = {'temp_save':{'inph':[],'quad':[],'raw':[],
-                                'amp':[],'phase':[]},
-                        'save':{'inph':[],'quad':[],'raw':[],
-                                'amp':[],'phase':[]},
-                        'plot':{'inph':[],'quad':[],'raw':[],
-                                'amp':[],'phase':[]}}
-
-    def def_setter(self):
-        ''' define setter functions of params'''
-        self.set_functions = {'sph':self.set_sph,'sweep':self.set_sweep,'step':self.set_step,
-                            'modes':self.set_modes,'volts':self.set_volts,'lockin':self.set_lockin,
-                            'data':self.set_data,'hard_config':self.set_hard_config,
-                            'soft_config':self.set_soft_config,'adwin_bootload':self.set_adwin_bootload}
-
-    def update_script(self):
-        ''' genererate measurement setup'''
-        self.create_output_channel()# create output channel for adwin
-        self.add_saves()            # generate data save and temp_save dicts
-        self.add_inputs()           # generate ADwin inputs
-        self.start_lockin()         # start lockin signal
-        self.update_lockin()        # get real lockin data from adwin
-
-        self.generate_sweep()       # generate sweep values
-        self.generate_steps()       # generate step values
-
-        self.init_wps()             # init start and stop wp of first sweep
-        self.start_sweep()          # start sweep to the first wp
-
-        self.create_tuning()        # create Tuning_ST instance
-        self.create_inputs()        # create a dict of the input nodes
-        self.register_measurement() # register measure function
-        self.set_node_bounds()      # create bounds for input variables
-        self.activate_measurement() # activate measurement
-        self.set_parameter()        # set x/y coordinate parameter
-        self.prepare_measurement_datasets()
-        self.prepare_measurement_datafile()
-
-        self.show_plots()           # determine names from datasets to plot
-        self.add_view()             # add view datasets
-
-    def end_measurement(self):
-        ''' end measurement'''
-        self.anna.stop_measurement()
-        self.tune._qvk_process.terminate()
-
-    def prepare_measurement_datasets(self):
-        ''' prepare datasets for measurement'''
-        if self.dim == 2:
-            self.ds = self.tune.multiplexer.prepare_measurement_datasets([self._x_parameter, self._y_parameter])
-        elif self.dim == 1:
-            self.ds = self.tune.multiplexer.prepare_measurement_datasets([self._x_parameter])
-
-    def prepare_measurement_datafile(self):
-        ''' prepare .hdf/h5 file for measurement'''
-        self.tune._prepare_measurement_file(self.ds)
-        self.coordinates = self.tune._coordinates
-        self.datasets = self.tune._datasets
-        self.datafile = self.tune._data_file
-
-    def create_tuning(self):
-        ''' creates instance of class Tuning_ST(Tuning)'''
+        # Instruments & tuning
+        self.adwin = adwin
         self.tune = Tuning_ST()
         self.tune.qviewkit_singleInstance = True
 
-    def create_output_channel(self):
-        ''' create output channel dictionary'''
-        self.outs = {key: val['channel'] for key, val in self.hard_config['outputs'].items()}
+        # Working points (initialized after adwin available)
+        adwin_outputs = self.adwin.list_connected_outputs()
+        self.wp_start = WorkingPoint(adwin_outputs, magnet='vector3d')
+        self.wp_stop = WorkingPoint(adwin_outputs, magnet='vector3d')
 
-    def show_plots(self):
-        ''' create list of datasets to plot'''
-        plotted_data = []
-        if self._modes['measure'] == 'sweep':
-            for key, val in self._data['plot'].items():
-                for key1 in val:
-                        plotted_data.append(f'sweep_measure.{key}_{key1}')
-        if plotted_data:
-            self.plots = plotted_data
+        self.generate_sweep()       # generate sweep values
+
+        # create stop event
+        self.stop_event = threading.Event()
+
+        # create GUI-Window
+        self.gui_window = tk.Tk()
+
+    # ----------------------- Configuration -----------------------
+
+    def setup_params(self):
+        ''' setup params for the measurement'''
+        self._wp_params = {'vd': 0, 'vg': 0, 'theta': 0, 'phi': 0, 'psi': 0,
+                           'bp': 0, 'bt': 0, 'mode': None}
+        self._sweep = {'name': None, 'start': None, 'stop': None,
+                       'unit': None, 'rate': None, 'duration': None,
+                       'values': None, 'wait_time': None}
+        # self._step = {'name': None, 'start': None, 'stop': None, 'unit': None,
+        #               'step_size': None, 'values': None, 'init_time': None,
+        #               'wait_time': None}
+        self._pulse = {'name': 'vd', 'amp': None, 'rate': None, 'unit': 'V',
+                       'pre_delay': 0.0, 'pulse_duration': 0.0, 'post_delay': 0.0, 'traces': set()}
+        self._trigger = {'traces': [], 'pre_delay':0.0, 'post_delay':0.0}
+        self._lockin = {'freq': None, 'amp': None, 'tao': None,
+                        'init_time': None, 'sample_rate': 500e3,
+                        'phase': None, 'maf': None}
+        self._inputs = {'retrace': False, 'difference': False, 'inputs': []}
+        self._plot = {'inph': set(), 'quad': set(), 'raw': set(), 'amp': set(), 'phase': set()}
+        self._save = {'inph': set(), 'quad': set(), 'raw': set(), 'amp': set(), 'phase': set()}
+        self._temp = {}
+        self._plot_dss = []
+
+    def def_setter(self):
+        ''' define setter funcs for measurement config params'''
+        self.set_functions = {
+            'wp_params': self.set_wp_params,
+            'sweep': self.set_sweep,
+            'step': self.set_step,
+            'pulse': self.set_pulse,
+            'trigger': self.set_trigger,
+            'lockin': self.set_lockin,
+            'plot': self.set_plot,
+            'save': self.set_save}
+
+    # ----------------------- Build/Activate the pipeline -----------------------
+
+    def init_measurement(self):
+        ''' genererate measurement setup'''
+        self.add_saves()            # generate data save and temp dicts
+        self.add_inputs()           # generate ADwin inputs
+
+        self.start_lockin()         # start lockin signal
+        self.update_lockin()        # get real lockin data from adwin
+        
+        self.init_wps()             # init start and stop wp of first sweep
+        self.sweep_to_startpoint()  # start sweep to the first wp
+        
+        self.create_inputs()        # create a dict of the input nodes
+        self.register_measurement() # register measure function
+        self.register_trigger()     # register trigger function
+        self.set_node_bounds()      # create bounds for input variables
+        self.activate_measurement() # activate measurement
+        self.activate_trigger()     # activate trigger
+        self.set_parameter()        # set x/y coordinate parameter (subclass specific)
+        self.prepare_measurement_datasets()  # subclass specific
+        self.prepare_measurement_datafile()
+
+        self.show_plots()           # determine names from datasets to plot
+        self.add_view()             # add view datasets (subclass specific)
+
+
+
+    # ----------------------- Trigger functions -----------------------
+    def send_trigger(self):
+        ''' send trigger to adwin'''
+        time.sleep(self._trigger['pre_delay'])
+        self.adwin.send_trigger()
+        time.sleep(self._trigger['post_delay'])
+
+    def send_pulse(self):
+        ''' perform pulse on pulse var'''
+        log.info("Sending pulse...")
+        time.sleep(self._pulse['pre_delay'])
+        # save current value of pulse var
+        temp = self.wp_start.outs[self._pulse['name']]
+
+        # sweep to pulse value (amp + temp)
+        self.wp_start.set(**{self._pulse['name']: self._pulse['amp']+temp})
+        duration = self._pulse['amp'] / self._pulse['rate']
+        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
+        # wait for pulse duration
+        time.sleep(self._pulse['pulse_duration'])
+        # sweep back to temp value
+        self.wp_start.set(**{self._pulse['name']: temp})
+        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
+
+    def trigger_trace(self):
+        ''' trigger trace sweep if live readout and initialize data dict'''
+        self.trace = {}
+        direction = 1
+
+        # pulse vd before trace measurement
+        if 'trace' in self._pulse.get('traces', []):
+            self.send_pulse()
+        # trigger AWG before sweep
+        if 'trace' in self._trigger['traces']:
+            self.send_trigger()
+
+        # trigger sweep if live readout
+        if self._sweep_readout_freq == 0:
+            pass
         else:
-            self.plots = None
+            self.adwin.sweep(self.wp_stop.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
+        return direction
 
-    def start_measurement(self):
-        ''' start activated measurement'''
-        self.save_config()
-        if self.dim == 1:
-            self.tune.measure1D(self.plots)
-        elif self.dim == 2:
-            self.tune.measure2D(self.plots)
+    def trigger_retrace(self):
+        ''' trigger retrace sweep if live readout and initialize data dict'''
+        self.retrace = {}
+        direction = -1
+
+        # pulse vd before retrace measurement
+        if 'retrace' in self._pulse.get('traces', []):
+            self.send_pulse()
+        # trigger AWG before sweep
+        if 'retrace' in self._trigger['traces']:
+            self.send_trigger()
+
+        # trigger sweep if live readout
+        if self._sweep_readout_freq == 0:
+            pass
         else:
-            assert ModuleNotFoundError
+            self.adwin.sweep(self.wp_start.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
+        return direction
+    
+    def trigger_difference(self):
+        ''' trigger difference calculation, only needed for live readout, to match triggers with measurements/calculations'''
+        self.difference = {}
+        direction = 1
+        return direction
 
-    def add_view(self):
-        ''' adds 1D views'''
-        for key in self.inputs_dict.keys():
-            if 'retrace' in key:
-                if self.dim == 2:
-                    view = self.datafile.add_view(name=key.replace("_retrace",""),x=self.coordinates[self._y_parameter.name],y=self.datasets['sweep_measure.'+key])
-                    view.add(x=self.coordinates[self._y_parameter.name], y=self.datasets['sweep_measure.'+key.replace("retrace","trace")])
-                else:
-                    view = self.datafile.add_view(name=key.replace("_retrace",""), x=self.coordinates[self._x_parameter.name], y=self.datasets['sweep_measure.'+key])
-                    view.add(x=self.coordinates[self._x_parameter.name], y=self.datasets['sweep_measure.'+key.replace("retrace","trace")])
-            if 'difference' in key:
-                if self.dim == 2:
-                    view = self.datafile.add_view(name=key, x=self.coordinates[self._y_parameter.name], y=self.datasets['sweep_measure.'+key])
-                else:
-                    view = self.datafile.add_view(name=key, x=self.coordinates[self._x_parameter.name], y=self.datasets['sweep_measure.'+key])
-        if 'amp_difference' in self.inputs_dict.keys():
-            if 'deg' in self._step.get('unit') or '°' in self._step.get('unit'):
-                view = self.datafile.add_polarview(name='polar_colormap', x=self.coordinates[self._x_parameter.name], y=self.coordinates[self._y_parameter.name], z=self.datasets['sweep_measure.amp_difference'])
+    # ----------------------- Measurement functions -----------------------
 
-    def set_parameter(self):
-        ''' setter for x/y parameter of measurement'''
-        if self.dim == 1:
-            self.tune.set_x_parameters(self._sweep['values'], self._sweep['name'], None, self._sweep['unit'])
-            self._x_parameter = self.tune._x_parameter
-        elif self.dim == 2:
-            self.tune.set_x_parameters(self._step['values'], self._step['name'], self.wp_setter, self._step['unit'])
-            self.tune.set_y_parameters(self._sweep['values'], self._sweep['name'], None, self._sweep['unit'])
-            self._x_parameter = self.tune._x_parameter
-            self._y_parameter = self.tune._y_parameter
+    def measure_trace(self):
+        ''' measure trace and generate data dict'''
+        # sleep for wait_time if set up
+        if self._sweep['wait_time']:
+            time.sleep(self._sweep['wait_time'])
+
+        samples = len(self._sweep['values'])
+        if self._sweep_readout_freq == 0:
+            if self._sweep['name'] == 'time':
+                trace = self.adwin.measure(duration=self._sweep['duration'])
+            else:
+                trace = self.adwin.sweep_measure(self.wp_stop.outs,
+                                             duration=self._sweep['duration'])
+            trace = {key: self.correct_len(val, samples) for key, val in trace.items() if val is not None}
+        else:
+            trace = self.adwin._fetch_data_from_fifos()
+        return self.calc_trace_saves(trace,'trace')
+
+    def measure_retrace(self):
+        ''' measure retrace and generate data dict'''
+        # sleep for wait_time if set up
+        if self._sweep['wait_time']:
+            time.sleep(self._sweep['wait_time'])
+
+        if self._sweep_readout_freq == 0:
+            if self._sweep['name'] == 'time':
+                retrace = self.adwin.measure(duration=self._sweep['duration'])
+            else:
+                retrace = self.adwin.sweep_measure(self.wp_start.outs,
+                                             duration=self._sweep['duration'])
+            samples = len(self._sweep['values'])
+            retrace = {key: self.correct_len(val, samples) for key, val in retrace.items() if val is not None}
+        else:
+            retrace = self.adwin._fetch_data_from_fifos()
+        return self.calc_trace_saves(retrace,'retrace')
+
+    def calc_trace_saves(self, data, trace):
+        ''' calculate and return saves with measured data of given trace or retrace'''
+        # temp contains inputs required to calcluate all save variables
+        temp = {}
+        # first handle all the direct inputs
+        for meas, traces in self._temp.items():
+            if meas in self.valids['inputs'] and trace in traces:
+                if isinstance(data[meas], np.ndarray):
+                    temp[f'{meas}'] = data[meas]
+        # then handle all input to be calculated from the direct inputs
+        for meas, traces in self._temp.items():
+            if meas in self.valids['calc'] and trace in traces:
+                func = self.valids['calc_func'][meas]
+                args = self.valids['calc'][meas]
+                if temp.get(f'{args[0]}', None) is not None and temp.get(f'{args[1]}', None) is not None:
+                    calcs = func(temp.get(f'{args[0]}'),
+                          temp.get(f'{args[1]}'))
+                    if isinstance(calcs, np.ndarray):
+                        temp[f'{meas}'] = calcs
+
+        # correct len (for live-readout)
+        samples = len(self._sweep['values'])
+        for meas, traces in self._save.items():
+            if trace in traces:
+                index = len(temp[f'{meas}']) - samples
+                if index < 0 and index >= -3:
+                    temp[f'{meas}'] = np.append(temp[f'{meas}'], [temp[f'{meas}'][-1]] * abs(index))
+        
+        # save temp saves for difference calculations
+        match trace:
+            case 'trace':
+                if self._sweep_readout_freq == 0:
+                    self.trace = temp
+                else:
+                    for key, val in temp.items():
+                        self.trace[key] = np.append(self.trace.get(key, np.empty((0,))),val)
+            case 'retrace':
+                if self._sweep_readout_freq == 0:
+                    self.retrace = temp
+                else:
+                    for key, val in temp.items():
+                        self.retrace[key] = np.append(self.retrace.get(key, np.empty((0,))),val)
+
+        # Put the data to be saved in the save to return
+        save = {}
+        for meas, traces in self._save.items():
+            if trace in traces:
+                if temp.get(f'{meas}', None) is not None and not None in temp[f'{meas}']:
+                    save[f'{meas}'] = temp[f'{meas}']
+        return save
+    
+
+    def calc_difference(self):
+        ''' calculate difference of last trace and retrace'''
+        # Put the data to be saved in the save to return
+        save = {}
+        for meas, traces in self._save.items():
+            if "difference" in traces:
+                if len(self.trace[f'{meas}']) == len(self.retrace[f'{meas}']):
+                    save[f'{meas}'] = np.flip(self.retrace[f'{meas}']) - self.trace[f'{meas}']
+                elif len(self.trace[f'{meas}']) < len(self.retrace[f'{meas}']):
+                    n = len(self.trace[f'{meas}'])
+                    save[f'{meas}'] = np.flip(self.retrace[f'{meas}'])[:n] - self.trace[f'{meas}']
+                elif len(self.trace[f'{meas}']) > len(self.retrace[f'{meas}']):
+                    n = len(self.retrace[f'{meas}'])
+                    save[f'{meas}'] = np.flip(self.retrace[f'{meas}']) - self.trace[f'{meas}'][:n]
+        return save
+
+
+    def correct_len(self, trace, samples):
+        ''' If the length of a trace is not exactly what is expected, either
+            the redundant samples are removed (, or the last sample is copied
+            until the trace is full !Not possible right now!).
+            The discrepancy is usally +-2 samples and therefore negligable '''
+        if self._sweep_readout_freq == 0:
+            n = len(trace)
+            if n != samples:
+                log.warning(f'Correcting length from {n} to {samples} samples!')
+        else:
+            assert Exception("correct_len only works for non-live readout!")
+
+        if n > samples:
+            return trace[:samples]
+        if n == samples:
+            return trace
+        if n < samples:
+            diff = samples - n
+            return np.append(trace, [trace[-1]] * diff)
+
+    # ----------------------- ADwin & lock‑in -----------------------
 
     def update_lockin(self):
         ''' updates the sample rate and lockin frequency data in the script
         with real data readout from adwin -> no new lockin signal'''
-        self.set_lockin(**{'freq':self.anna.adw.Get_FPar(24),'sample_rate':self.anna.adw.Get_FPar(26)})
-
-    def get_wp(self):
-        ''' getter function for last working point of adwin'''
-        return self.anna.read_outputs()
-
-    def start_sweep(self):
-        ''' start sweep from adwin outputs to the first wp of the measurement'''
-        outs_start = self.get_wp()
-        start_time=0
-        for key,val in self.wp_start.outs.items():
-            duration = abs(val - outs_start[self.hard_config['outputs'][key]['channel']-1])/self.valids['maxrate'][key]
-            if start_time < duration:
-                start_time = duration
-        log.info(f"Sweeping to start working point! Sweep durtion is {round(start_time,2)}s")
-        self.ramp_to_wp(dt=start_time)
-        time.sleep(5)
-
-    def get_hard_config(self):
-        ''' getter function for hard config of adwin'''
-        return self.hard_config
-
-    def get_soft_config(self):
-        ''' getter function for soft config of adwin'''
-        return self.soft_config
+        self.set_lockin(**{'freq': self.adwin.get_lockin_frequency(),
+                           'sample_rate':self.adwin.get_sample_rate()})
 
     def start_lockin(self):
         ''' start lockin signal'''
-        if self._lockin['amp']:
-            self.anna.init_measurement('lockin', self._lockin['sample_rate'], bias=self._volts['vd'], inputs=self._inputs['inputs'],
-                                    amplitude=self._lockin['amp'], frequency=self._lockin['freq'], tao=self._lockin['tao'])
-        else:
-            log.warning("No lockin signal applied!")
-            self.stop_lockin()
-        time.sleep(1)
+        self.adwin.init_measurement(
+            sample_rate=self._lockin['sample_rate'],
+            bias=self.get_bias(),
+            inputs=self._inputs['inputs'],
+            frequency=self._lockin['freq'],
+            amplitude=self._lockin['amp'],
+            phase=self._lockin['phase'],
+            tao=self._lockin['tao'],
+            maf=self._lockin['maf']
+            )
+        if self._lockin['init_time']:
+            time.sleep(self._lockin['init_time'])
 
-    def stop_lockin(self):
-        ''' stop lockin signal'''
-        self.anna.init_measurement('lockin', sample_rate=100, bias=self._volts['vd'], inputs=['raw'],
-                                    amplitude=0, frequency=100, tao=1/100)
+    # ----------------------- Sweep & steps -----------------------
 
-    def sweep_measure(self):
-        ''' measure sweep and generate data dict'''
-        trace,retrace=None,None
-        trace = self.anna.sweep_measure(self.wp_stop.outs, duration=self._sweep['duration'])
-        if self._inputs['retrace']:
-            retrace = self.anna.sweep_measure(self.wp_start.outs, duration=self._sweep['duration'])
-        sample_rate = int(self.anna.adw.Get_FPar(26)*self.anna.adw.Get_FPar(21))
-        values_dict = {}    # dictionary contains all the data required to calculate the data to be saved
-        for key,val in self._data['temp_save'].items():
-            if val:
-                if key in self.valid_inputs:                        # inph, quad and raw data
-                    tr, rt, diff = [], [], []
-                    for key1 in val:
-                        if key1 == 'trace':
-                            tr = trace[key].astype(np.float32)[:sample_rate]
-                        elif key1 == 'retrace':
-                            rt = np.flip(retrace[key].astype(np.float32)[:sample_rate])
-                    if 'difference' in val:
-                        if isinstance(tr, np.ndarray) and isinstance(rt, np.ndarray):
-                            diff = rt - tr
-                        else:
-                            assert ValueError
-                    if isinstance(tr, np.ndarray):
-                        values_dict[f'{key}_trace']=tr
-                    if isinstance(rt, np.ndarray):
-                        values_dict[f'{key}_retrace']=rt
-                    if isinstance(diff, np.ndarray):
-                        values_dict[f'{key}_difference']=diff
-        for key,val in self._data['temp_save'].items():             # amp and phase data calculation
-            if val:
-                if key in self.valid_calc:
-                    amp, phase = {'trace':[],'retrace':[],'difference':[]}, {'trace':[],'retrace':[],'difference':[]}
-                    for key1 in val:
-                        if (values_dict.get(f'inph_{key1}') is not None) and (values_dict.get(f'quad_{key1}') is not None):
-                            if key == 'amp':
-                                amp[key1] = calc_r(values_dict.get(f'inph_{key1}'), values_dict.get(f'quad_{key1}'))
-                            elif key == 'phase':
-                                phase[key1] = calc_theta(values_dict.get(f'inph_{key1}'), values_dict.get(f'quad_{key1}'))
-                            else:
-                                assert KeyError
-                        else:
-                            assert ValueError
-                    if 'difference' in val:
-                        if key == 'amp':
-                            if isinstance(amp['trace'],np.ndarray) and isinstance(amp['retrace'],np.ndarray):
-                                amp[key1] = amp.get('retrace') - amp.get('trace')
-                            else:
-                                assert ValueError
-                        elif key == 'phase':
-                            if isinstance(phase['trace'],np.ndarray) and isinstance(phase['retrace'],np.ndarray):
-                                phase[key1] = phase.get('retrace') - phase.get('trace')
-                            else:
-                                assert ValueError
-                        else:
-                            assert KeyError
-                    for key1,val1 in amp.items():
-                        if isinstance(val1, np.ndarray):
-                            values_dict[f'{key}_{key1}']=val1
-                    for key1,val1 in phase.items():
-                        if isinstance(val1, np.ndarray):
-                            values_dict[f'{key}_{key1}']=val1
-        save_dict = {}      # dictionary with the data to be saved
-        for key, val in self._data['save'].items():
-            for key1 in val:
-                save_dict[f'{key}_{key1}'] = values_dict[f'{key}_{key1}']
-        return save_dict
+    def sweep_to_startpoint(self):
+        ''' start sweep from adwin outputs to the first wp of the measurement'''
+        outs_start = self.adwin.read_outputs(out_format='qty', select='connected')
+        # Find the sweep time to the first wp of the measurement by
+        # comparing the necessary sweep times for each output
+        sweep_time = 0.01
+        for key, val in self.wp_start.outs.items():
+            duration = abs(val - outs_start[key]) / self.valids['maxrate'][key]
+            sweep_time = max(sweep_time, duration)
+        log.info(f"Sweeping to start point in {sweep_time:.3f}s!")
+        self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
+
+# ------------------- Input creation & registration via tune -------------------
+
+    def set_parameter(self):
+        ''' prepare x parameter for measurement'''
+        self.tune.set_x_parameters(self._sweep['values'], self._sweep['name'], None, self._sweep['unit'])
+        self._x_parameter = self.tune._x_parameter
 
     def create_inputs(self):
         ''' create dictionary for measurement inputs with unit'''
         self.inputs_dict = {}
-        for key, val in self._data['save'].items():
+        for key, val in self._save.items():
             for key1 in val:
-                self.inputs_dict[f'{key}_{key1}'] = self.unit[key]
-
-    def register_measurement(self):
-        ''' register measurement with needed data input dict'''
-        if self._modes['measure'] == 'sweep':
-            self.tune.register_measurement('sweep_measure', self.inputs_dict, self.sweep_measure)
+                self.inputs_dict[f'{key}'] = self.valids['unit'][key]
 
     def set_node_bounds(self):
         ''' set bounds for data input dict'''
-        if self._modes['measure'] == 'sweep':
-            for key,val in self.inputs_dict.items():
-                    self.tune.set_node_bounds('sweep_measure', key, -10e9, 10e9)
+        for key in self.inputs_dict:
+            if 'retrace' in key:
+                self.tune.set_node_bounds('measure_retrace', key, -10e9, 10e9)
+            elif 'trace' in key:
+                self.tune.set_node_bounds('measure_trace', key, -10e9, 10e9)
+            elif "difference" in key:
+                self.tune.set_node_bounds('calc_difference', key, -10e9, 10e9)
+
+    def register_trigger(self):
+        ''' register triggers'''
+        self.tune.register_trigger('trigger_trace', self.trigger_trace)
+        if self._inputs['retrace']:
+            self.tune.register_trigger('trigger_retrace', self.trigger_retrace)
+        if self._inputs["difference"]:
+            self.tune.register_trigger('trigger_difference', self.trigger_difference)
+
+    def register_measurement(self):
+        ''' register measurement with needed data input dict'''
+        self.tune.register_measurement('measure_trace', self.inputs_dict, self.measure_trace)
+        if self._inputs['retrace']:
+            self.tune.register_measurement('measure_retrace', self.inputs_dict, self.measure_retrace)
+        if self._inputs["difference"]:
+            self.tune.register_measurement('calc_difference', self.inputs_dict, self.calc_difference)
+
+    def activate_trigger(self):
+        ''' activate trigger'''
+        self.tune.activate_trigger('trigger_trace')
+        if self._inputs['retrace']:
+            self.tune.activate_trigger('trigger_retrace')
+        if self._inputs["difference"]:
+            self.tune.activate_trigger('trigger_difference')
+
     def activate_measurement(self):
         ''' activate measurement'''
-        if self._modes['measure'] == 'sweep':
-            self.tune.activate_measurement('sweep_measure')
+        self.tune.activate_measurement('measure_trace')
+        if self._inputs['retrace']:
+            self.tune.activate_measurement('measure_retrace')
+        if self._inputs["difference"]:
+            self.tune.activate_measurement('calc_difference')
+
+    def prepare_measurement_datafile(self):
+        ''' prepare .hdf/h5 file for measurement'''
+        self.tune._prepare_measurement_file(self.ds)
+
+    def prepare_measurement_datasets(self):
+        ''' prepare datasets for measurement'''
+        self.ds = self.tune.multiplexer.prepare_measurement_datasets([self._x_parameter])
+
+    def start_measurement(self):
+        ''' save measurement config, create emergency stop button
+            and start activated measurement'''
+        # save config in .hdf5 file
+        self.save_config()
+        if self._sweep_readout_freq != 0:
+            self.gui_window.title("Measurement running")
+
+            # Add label and button
+            label = tk.Label(self.gui_window, text="Measurement running...\nClick to stop")
+            label.pack(padx=40, pady=20)
+            stop_button = tk.Button(self.gui_window, text="Stop", command=self.stop_measurement, bg="red", fg="white")
+            stop_button.pack(padx=40, pady=20)
+
+            # start measurement in separate thread
+            t = threading.Thread(target=self.tune.measure1D, kwargs={
+                    'data_to_show': self._plot_dss,
+                    'readout_dur': 1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+                    'stop_event': self.stop_event})
+            t.start()
+
+            # start GUI
+            self.gui_window.mainloop()
+        else:
+            print("Plot the following datasets: ", self._plot_dss)
+            self.tune.measure1D(data_to_show=self._plot_dss, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+                                stop_event=self.stop_event)
+
+    def stop_measurement(self):
+        ''' stop measurement'''
+        self.adwin.stop_sweep()
+        self.stop_event.set()
+        self.gui_window.destroy()
+
+    def end_measurement(self):
+        ''' end measurement'''
+        self.adwin.stop_measurement()
+        try:
+            self.tune._qvk_process.terminate()
+        except Exception as e:
+            log.warning(f"Failed to terminate qvk process: {e}")
+
+    # ----------------------- Working points -----------------------
 
     def init_wps(self):
-        self.wp_start = WorkingPoint(self.outs.keys(), magnet='vector3d')
-        self.wp_start.set_sph(**self._sph)
-        self.wp_start.set_wp(**self._volts)
-        self.wp_start.set_mode(self._modes['wp'])
-        self.wp_stop = WorkingPoint(self.outs.keys(), magnet='vector3d')
-        self.wp_stop.set_sph(**self._sph)
-        self.wp_stop.set_wp(**self._volts)
-        self.wp_stop.set_mode(self._modes['wp'])
-        if (self._sweep['name'] in self.wp_start.get_sph().keys()):
-            self.wp_start.set_sph(**{self._sweep['name']:self._sweep['start']})
-            self.wp_stop.set_sph(**{self._sweep['name']:self._sweep['stop']})
-        elif (self._sweep['name'] in self.wp_start._outputs.keys()):
-            self.wp_start.set_wp(**{self._sweep['name']:self._sweep['start']})
-            self.wp_stop.set_wp(**{self._sweep['name']:self._sweep['stop']})
-        if self.dim == 2:
-            self.set_start_wp()
-            self.set_stop_wp()
+        ''' Initialize start and stop working points for map '''
+        # set start and stop wp with current bias and magnet
+        self.wp_start.set(**self._wp_params)
+        self.wp_stop.set(**self._wp_params)
+        # set start and stop of sweep var
+        if self._sweep['name'] in self._wp_params:
+            self.wp_start.set(**{self._sweep['name'] : self._sweep['start']})
+            self.wp_stop.set(**{self._sweep['name'] : self._sweep['stop']})
 
     def set_start_wp(self,**kwargs):
         ''' setter function for start working point of sweep'''
-        if self._step['name'] in self.wp_start.get_sph().keys():
-            self.wp_start.set_sph(**kwargs)
-        elif self._step['name'] in self.wp_start._outputs.keys():
-            self.wp_start.set_wp(**kwargs)
+        self.wp_start.set(**kwargs)
 
     def set_stop_wp(self,**kwargs):
         ''' setter function for stop working point of sweep'''
-        if self._step['name'] in self.wp_stop.get_sph().keys():
-            self.wp_stop.set_sph(**kwargs)
-        elif self._step['name'] in self.wp_stop._outputs.keys():
-            self.wp_stop.set_wp(**kwargs)
+        self.wp_stop.set(**kwargs)
 
-    def ramp_to_wp(self,dt):
-        ''' sweep to wp without measurement'''
-        self.anna.sweep(self.wp_start.outs,duration=dt)
-
-    def wp_setter(self, x=None, dt=None):
-        ''' set new step val of step var for wp'''
-        if self._inputs['retrace']:
-            temp_wp_outs=self.wp_start.outs
-        else:
-            temp_wp_outs=self.wp_stop.outs
-        self.set_start_wp(**{self._step['name']:x})
-        self.set_stop_wp(**{self._step['name']:x})
-        min_duration=0
-        for key,val in self.wp_start.outs.items():
-            duration = abs(val - temp_wp_outs[key])/self.max_rate_config[key]
-            if min_duration < duration:
-                min_duration = duration
-        if dt is None:
-            dt = min_duration
-        elif dt<min_duration:
-            log.warning(f'Fixed ramp duration {dt}s is not safe, duration was set to minimal possible duration {min_duration}s!')
-            dt = min_duration
-        self.ramp_to_wp(dt=dt)
-
-    def generate_steps(self):
-        ''' generate steps for step variable if possible'''
-        if (self._step['start'] is not None and self._step['stop'] is not None and self._step['step_size'] is not None):
-            self._step['values'] = np.arange(self._step['start'], self._step['stop']+self._step['step_size'],
-                                            self._step['step_size'],dtype=np.float32)
-            self.dim = 2
-        else:
-            log.info("Couldn't generate step value list, inputs missing!")
-            self.dim = 1
+    # ----------------------- Sweep value generation -----------------------
 
     def generate_sweep(self):
         ''' generate steps for sweep variable if possible'''
-        # Validation of sweep rate/duration
-        if self._sweep['rate'] and (self._sweep['start'] is not None and self._sweep['stop'] is not None):
-            print(self._sweep['name'])
-            if self.max_rate_config[self._sweep['name']] < self._sweep['rate']:
-                log.warning(f"Rate of {self._sweep['rate']} is not valid! Set rate to max rate {self.max_rate_config[self._sweep['name']]}")
-                self._sweep['rate'] = self.max_rate_config[self._sweep['name']]
-            self._sweep['duration'] = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['rate']
-            log.info(f"Set sweep duration to {self._sweep['duration']}")
-        elif self._sweep['duration'] and (self._sweep['start'] is not None and self._sweep['stop'] is not None):
-            rate = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['duration']
-            if self.max_rate_config[self._sweep['name']] < rate:
-                self._sweep['rate'] = self.max_rate_config[self._sweep['name']]
-                log.warning(f"Sweep duration {self._sweep['duration']} with rate {rate} is not valid! Set rate to max rate {self.max_rate_config[self._sweep['name']]}!")
-                self._sweep['duration'] = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['rate']
+        # if there is not start AND stop values for the sweep given
+        if None in [self._sweep['start'], self._sweep['stop']]:
+            # check if the sweep variable is time
+            if self._sweep['name'] == 'time':
+                self._sweep['start'] = 0
+                self._sweep['stop'] = self._sweep['duration']
             else:
-                self._sweep['rate'] = rate
-        elif (self._sweep['start'] is not None and self._sweep['stop'] is not None):
-            log.warning(f"No rate set! Set rate to max rate {self.max_rate_config[self._sweep['name']]}")
-            self._sweep['rate'] = self.max_rate_config[self._sweep['name']]
-            self._sweep['duration'] = abs(self._sweep['stop']-self._sweep['start'])/self._sweep['rate']
-            log.info(f"Set sweep duration to {self._sweep['duration']}")
+                raise SettingsError
+        # if rate is given, calculate duration and check maxrate
+        if self._sweep['rate'] is not None:
+            if self.valids['maxrate'][self._sweep['name']] < self._sweep['rate']:
+                log.warning("Sweep rate exceeds maximum!")
+                raise SettingsError
+            duration = abs(self._sweep['stop'] - self._sweep['start']) / self._sweep['rate']
+            self._sweep['duration'] = duration
+            log.info(f"Set sweep duration to {duration}")
+        # if duration is given check maxrate
+        elif self._sweep['duration'] is not None:
+            rate = abs(self._sweep['stop'] - self._sweep['start']) / self._sweep['duration']
+            if self.valids['maxrate'][self._sweep['name']] < rate:
+                log.warning("Sweep rate exceeds maximum!")
+                raise SettingsError
         else:
-            assert ValueError("Values for sweep missing!")
-        if (self._sweep['start'] is not None and self._sweep['stop'] is not None and self._sweep['rate'] is not None):
-            self._sweep['values'] = np.linspace(
-                self._sweep['start'],self._sweep['stop'],
-                round(self._sweep['duration']*self._lockin['sample_rate']),dtype=np.float32)
-            log.info("Generated sweep values!")
+            raise SettingsError
+        # calculate sweep values array
+        samples = round(self._sweep['duration'] * self._lockin['sample_rate'])
+        sweep_values = np.linspace(self._sweep['start'], self._sweep['stop'], samples, dtype=np.float32)
+        if len(sweep_values) >= 1:
+            self._sweep['values'] = sweep_values
         else:
-            log.error("Couldn't generate sweep value list, inputs missing!")
+            raise SettingsError('No sweep values planned for this measurement!')
+        log.info("Generated sweep values!")
 
-    def get_sph(self):
-        ''' getter func for sph vars'''
-        return self._sph
 
-    def get_step(self):
-        ''' getter func for step vars'''
-        step = {'name':self._step['name'],'start':self._step['start'],'stop':self._step['stop'],
-                'step_size':self._step['step_size'],'unit':self._step['unit']}
-        return step
-
-    def get_sweep(self):
-        ''' getter func for sweep vars'''
-        sweep = {'name':self._sweep['name'],'start':self._sweep['start'],'stop':self._sweep['stop'],
-                    'rate':self._sweep['rate'],'unit':self._sweep['unit'],'duration':self._sweep['duration']}
-        return sweep
-
-    def get_step_val(self):
-        ''' getter func for step values'''
-        if self._step['values'] is None:
-            self.generate_steps()
-        return self._step
-
-    def get_sweep_val(self):
-        ''' getter func for sweep values'''
-        if self._sweep['values'] is None:
-            self.generate_sweep()
-        return self._sweep
-
-    def get_modes(self):
-        ''' getter func for modes of wp and measurement'''
-        return self._modes
-
-    def get_volts(self):
-        ''' getter func for volts'''
-        return self._volts
-
-    def get_lockin(self):
-        ''' getter func for lockin signal pars'''
-        return self._lockin
-
-    def get_inputs(self):
-        ''' getter func for inputs of adwin'''
-        return self._inputs
-
-    def get_data(self):
-        ''' getter func for data save and plot information'''
-        return self._data
+    # ----------------------- Data save & input generation -----------------------
 
     def add_saves(self):
-        ''' getter func for data measurement, saving and live plotting'''
-        for key,val in self._data['plot'].items():      # keys: inph, quad, raw, amp, phase
-            for key1 in val:                            # keys: trace, retrace, difference
-                if key1 not in self._data['save'][key]:
-                    self._data['save'][key].append(key1)
-        for key,val in self._data['save'].items():
-            temp = str(val)
-            if 'difference' in temp:
-                for key1 in self.valids['traces']:
-                    if key1 not in self._data['temp_save'][key]:
-                        self._data['temp_save'][key].append(key1)
-            elif 'retrace' in temp:
-                for key1 in ['trace','retrace']:
-                    if key1 not in self._data['temp_save'][key]:
-                        self._data['temp_save'][key].append(key1)
-            elif 'trace' in temp:
-                if 'trace' not in self._data['temp_save'][key]:
-                    self._data['temp_save'][key].append('trace')
-        for key,val in self._data['temp_save'].items():
-            if key == 'amp':
-                for key1 in val:
-                    for val1 in ['inph', 'quad']:
-                        if key1 not in self._data['temp_save'][val1]:
-                            self._data['temp_save'][val1].append(key1)
-            elif key == 'amp':
-                for key1 in val:
-                    for val1 in ['inph', 'quad']:
-                        if key1 not in self._data['temp_save'][val1]:
-                            self._data['temp_save'][val1].append(key1)
-        return self._data
+        ''' generate save and temp dicts from plot and save dict'''
+        # first add all plot traces to save dict
+        for meas, traces in self._plot.items():
+            self._save[meas].update(traces)
+        # add trace and retrace to save dict if difference is requested
+        for meas, traces in self._save.items():
+            if traces == 'difference':
+                self._save[meas].update({'trace', 'retrace'})
+        # then generate temp dict from save dict
+        for meas, traces in self._save.items():
+            if traces:
+                # add meas to temp
+                self._temp[meas] = traces
+                # if calcuable, add dependencies to temp
+                if meas in self.valids['calc']:
+                    for dep in self.valids['calc'][meas]:
+                        try:
+                            self._temp[dep].update(self._save[meas])
+                        except KeyError:
+                            self._temp[dep] = self._save[meas]
 
     def add_inputs(self):
         ''' generate adwin inputs'''
-        for key, val in self._data['temp_save'].items():
+        # add all direct inputs from temp to inputs dict
+        for key, val in self._temp.items():
             if key in self.valids['inputs'] and val:
                 if key not in self._inputs['inputs']:
                     self._inputs['inputs'].append(key)
-        temp = str(self._data['temp_save'])
-        if 'retrace' in temp:
+        if any(s in str(self._temp) for s in ['retrace', 'difference']):
             self._inputs['retrace'] = True
+        if any(s in str(self._temp) for s in ["difference"]):
+            self._inputs['difference'] = True
 
-    def set_(self,**kwargs):
-        ''' setter for multiple vars'''
-        for key,val in kwargs.items():
-            if key in self.set_functions.keys() and isinstance(val,dict):
+    # ----------------------- Plots & view addition -----------------------
+    
+    def show_plots(self):
+        ''' create list of datasets to plot'''
+        plotted_data = []
+        for meas, traces in self._plot.items():
+            for trd in traces:
+                match trd:
+                    case 'trace':
+                        plotted_data.append(f'measure_trace.{meas}')
+                    case 'retrace':
+                        plotted_data.append(f'measure_retrace.{meas}')
+                    case 'difference':
+                        plotted_data.append(f'calc_difference.{meas}')
+        self._plot_dss = plotted_data or None
+
+    def add_view(self):
+        ''' add 1D view trace and retrace in one plot'''
+        for key in self._save:
+            trd = self._save.get(key,[])
+            if trd:
+                view = self.tune._data_file.add_view(
+                    name=key,
+                    x=self.tune._coordinates[self._x_parameter.name],
+                    y=self.tune._datasets['measure_trace.' + key]
+                )
+            if 'retrace' in trd:
+                view.add(
+                    x=self.tune._coordinates[self._x_parameter.name],
+                    y=self.tune._datasets['measure_retrace.' + key]
+                )
+            if "difference" in trd:
+                self.tune._data_file.add_view(
+                    name=key+'_difference',
+                    x=self.tune._coordinates[self._x_parameter.name],
+                    y=self.tune._datasets['calc_difference.' + key]
+                )
+
+    # ----------------------- Getters/Setters & serialization -----------------------
+
+    def get_wp_params(self):
+        ''' getter for working point params'''
+        return self._wp_params
+    
+    def get_bias(self):
+        ''' getter for bias voltage'''
+        return self._wp_params['vd']
+
+    def get_step(self):
+        raise NotImplementedError('Step getting not implemented in 1D measurement!')
+
+    def get_sweep(self):
+        ''' getter for sweep vars'''
+        return {k: v for k, v in self._sweep.items() if k != 'values'}
+
+    def get_lockin(self):
+        ''' getter for lockin params'''
+        return self._lockin
+
+    def get_pulse(self):
+        ''' getter for pulse params'''
+        return {k: list(v) if isinstance(v, set) else v
+                for k, v in self._pulse.items()}
+
+    def get_trigger(self):
+        ''' getter for save dict'''
+        return {k: list(v) if isinstance(v, set) else v
+                for k, v in self._trigger.items()}
+    
+    def get_inputs(self):
+        ''' getter for inputs of adwin'''
+        return self._inputs
+
+    def get_plot(self):
+        ''' getter for plot dict'''
+        return {m: list(traces) for m, traces in self._plot.items()}
+
+    def get_save(self):
+        ''' getter for save dict'''
+        return {m: list(traces) for m, traces in self._save.items()}
+
+    def set(self, **kwargs):
+        ''' general setter function for all vars'''
+        for key, val in kwargs.items():
+            if key in self.set_functions:
                 self.set_functions[key](**val)
-            elif key in self.set_functions.keys():
-                self.set_functions[key](val)
             else:
-                log.error(f'{self} have no var called {key} of type {val}!')
-
-    def set_adwin_bootload(self, bootlead):
-        ''' setter function for bootload of adwin (True/False)'''
-        if isinstance(bootlead,bool):
-            self.adwin_bootload = bootlead
-        else:
-            log.error("Bootload value only allows booleans!")
-
-    def set_hard_config(self, **kwargs):
-        ''' setter function to update adwin hard config'''
-        if isinstance(kwargs,dict):
-            self.hard_config = kwargs
-            # log.warning("Hard config for Adwin was changed!")
-        else:
-            assert ValueError
-
-    def set_soft_config(self, **kwargs):
-        ''' setter function to update adwin soft config'''
-        if isinstance(kwargs,dict):
-            self.soft_config = kwargs
-            # log.warning("Soft config for adwin was changed!")
-        else:
-            assert ValueError
+                log.error(f'{self} has no var called {key} of type {val}!')
 
     def set_sweep(self, **kwargs):
-        ''' setter func for sweep'''
-        for key,val in kwargs.items():
-            if key in self._sweep.keys():
+        ''' setter for sweep parameters '''
+        for key, val in kwargs.items():
+            if key in self._sweep:
                 match key:
                     case 'unit':
-                        if isinstance(val,str):
+                        if isinstance(val, str):
                             self._sweep[key] = val
                     case 'name':
                         if val in self.valids['sweep']:
                             self._sweep[key] = val
                         else:
-                            log.error(f'{val} is no valid value for sweep_{key}!')
+                            assert Exception(f'{val} is no valid value for sweep_{key}!')
                     case 'start' | 'stop' | 'duration' | 'rate':
-                        if isinstance(val,(int,float)):
+                        if isinstance(val, (int, float)):
                             self._sweep[key] = val
                         else:
-                            log.error(f'Value of {key} must be float or integer!')
+                            assert Exception(f'Value of {key} must be float or integer!')
+                    case 'wait_time':
+                        self._sweep['wait_time'] = val
+            else:
+                raise SettingsError
 
+        # override wp_params with sweep start value
+        if self._sweep['name'] in self._wp_params:
+            log.info(f"Override wp_param {self._sweep['name']} = {self._wp_params[self._sweep['name']]} with sweep start value {self._sweep['start']}")
+            self._wp_params[self._sweep['name']] = self._sweep['start']
+        
 
     def set_step(self, **kwargs):
-        ''' setter func for step'''
-        for key,val in kwargs.items():
-            if key in self._step.keys():
+        raise NotImplementedError('Step setting not implemented in 1D measurement!')
+    
+    def set_pulse(self, **kwargs):
+        ''' setter for pulse parameters '''
+        for key, val in kwargs.items():
+            if key in self._pulse:
+                match key:
+                    case 'name':
+                        log.error('Pulse name can not be changed! Only "vd" is supported!')
+                    case 'unit':
+                        log.error('Pulse unit can not be changed! Unit of "vd" is always "V"!')
+                    case 'amp' | 'rate' | 'wait_time' | 'delay_time':
+                        if isinstance(val, (int, float)):
+                            self._pulse[key] = val
+                        else:
+                            assert Exception(f'Value of {key} must be float or integer!')
+                    case 'traces':
+                        if all(trd in self.valids['traces'] for trd in val):
+                            self._pulse[key] = val
+            else:
+                raise SettingsError(f'Pulse has no var called {key}!')
+
+    def set_wp_params(self, **kwargs):
+        ''' setter for wp params'''
+        for key, val in kwargs.items():
+            if key == "mode":
+                if val in self.valids["mode"]:
+                    self._wp_params[key] = val
+                else:
+                    assert Exception(f'Mode for working point magnet must be in {self.valids["mode"]}')
+            elif key in self._wp_params:
+                if isinstance(val,(int,float)):
+                    self._wp_params[key] = val
+                else:
+                    assert Exception(f'Value of {key} must be float or integer!')
+
+    def set_trigger(self, **kwargs):
+        ''' setter for trigger dict'''
+        for key, val in kwargs.items():
+            if key == 'traces':
+                if all(trd in self.valids['traces'] for trd in val):
+                    self._trigger[key] = val
+                else:
+                    log.error(f'Not all "traces" in {val} are allowed.')
+            elif key in self.valids['trigger']:
+                if isinstance(val, (int, float)):
+                    self._trigger[key] = val
+                else:
+                    log.error(f'Value of {key} must be float or integer!')
+            else:
+                log.error(f'{key} is no available parameter for trigger.')
+
+    def set_lockin(self, **kwargs):
+        ''' setter for lockin params'''
+        for key, val in kwargs.items():
+            if key in self._lockin:
+                if isinstance(val, (int, float)):
+                    self._lockin[key] = val
+                elif val is None and key in ['tao', 'maf']:
+                    self._lockin[key] = val
+                else:
+                    log.error(f'Value of {key} must be float or integer!')
+
+    def set_plot(self, **kwargs):
+        ''' setter for plot dict'''
+        for meas, traces in kwargs.items():
+            if meas in self.valids['calc'] or meas in self.valids['inputs']:
+                if all(trd in self.valids['traces'] for trd in traces):
+                    self._plot[meas] = traces
+                else:
+                    log.error(f'Not all "traces" in {traces} are allowed.')
+            else:
+                log.error(f'Measurement variable {meas} is not available.')
+
+    def set_save(self, **kwargs):
+        ''' setter for save dict'''
+        for meas, traces in kwargs.items():
+            if meas in self.valids['calc'] or meas in self.valids['inputs']:
+                if all(trd in self.valids['traces'] for trd in traces):
+                    self._save[meas] = traces
+                else:
+                    log.error(f'Not all "traces" in {traces} are allowed.')
+            else:
+                log.error(f'Measurement variable {meas} is not available.')
+
+    # ----------------------- Config I/O -----------------------
+
+    def save_config(self):
+        ''' save measurement config to .h/hdf5 file'''
+        self.save = self.tune._data_file.add_config()
+        self.save.add('ds_type', 'config')
+        self.save.add('wp_params', self.get_wp_params())
+        self.save.add('sweep', self.get_sweep())
+        # self.save.add('step', self.get_step())
+        self.save.add('lockin', self.get_lockin())
+        self.save.add('pulse', self.get_pulse())
+        self.save.add('inputs', self.get_inputs())
+        self.save.add('plot', self.get_plot())
+        self.save.add('save', self.get_save())
+        self.save.add('config', self.adwin.aio.get_config())
+
+
+    def load_config(self, h5_path):
+        ''' load measurement config from .h/hdf5 file'''
+        try:
+            hf = h5py.File(h5_path)
+            config_ds = hf["entry/data0/measurement.config"]
+            config = {}
+            for key, val in config_ds.attrs.items():
+                try:
+                    config[key] = json.loads(val)
+                except Exception:
+                    pass
+            log.info('Load measurement config from .h/hdf5 file...')
+            if 'hard_config' not in config:
+                log.error('Could not load hard_config for adwin!')
+            if 'soft_config' not in config:
+                log.error('Could not load soft_config for adwin!')
+            self.set(**config)
+            log.info('Config from .h/hdf5 file loaded.')
+        except ImportError:
+            log.error('Load config from .h/hdf5 file failed!')
+
+
+# ----------------------------- 2D subclass ------------------------------------
+
+class Measure2D(Measure1D):
+    """2D map measurement (step + sweep)."""
+
+    def __init__(self, adwin: adwin_spin_transistor, readout_freq = 0, h5_path: str | None = None, **kwargs):
+        self._step = {'name': None, 'start': None, 'stop': None, 'unit': None,
+                      'step_size': None, 'values': None, 'init_time': None,
+                      'wait_time': None}
+        super().__init__(adwin, readout_freq, h5_path, **kwargs)
+        self.generate_steps()
+
+    def generate_steps(self):
+        ''' generate steps for step variable if possible'''
+        start = self._step['start']
+        stop = self._step['stop']
+        step = None if self._step['step_size'] is None else abs(self._step['step_size'])
+        if None in [start, stop, step]:
+            log.info("Couldn't generate step value list, inputs missing! Falling back to 1D behavior.")
+            self._step['values'] = None
+            return
+        step_count = round(abs(start-stop)/step)+1
+        log.info("Generate step values!")
+        step_values = np.linspace(start, stop, step_count)
+        # save step_values as float32
+        self._step['values'] = np.array(step_values, dtype=np.float32)
+        log.info("Generated step values!")
+
+    def prepare_measurement_datasets(self):
+        ''' prepare datasets for measurement'''
+        self.ds = self.tune.multiplexer.prepare_measurement_datasets([self._x_parameter, self._y_parameter])
+
+    def set_step(self, **kwargs):
+        ''' setter for step parameters'''
+        for key, val in kwargs.items():
+            if key in self._step:
                 match key:
                     case 'unit':
-                        if isinstance(val,str):
+                        if isinstance(val, str):
                             self._step[key] = val
                     case 'name':
                         if val in self.valids['step']:
                             self._step[key] = val
                         else:
                             log.error(f'{val} is no valid value for step_{key}!')
-                    case 'start' | 'stop' | 'step_size':
-                        if isinstance(val,(int,float)):
+                    case 'start' | 'stop' | 'step_size' | 'init_time' | 'wait_time':
+                        if isinstance(val, (int, float)):
                             self._step[key] = val
                         else:
+                            log.info(f'Skip setting step param {key} with value {val}!')
                             log.error(f'Value of {key} must be float or integer!')
+        
+        # override wp_params with step start value
+        if self._step['name'] in self._wp_params:
+            log.info(f"Override wp_param {self._step['name']} = {self._wp_params[self._step['name']]} with step start value {self._step['start']}")
+            self._wp_params[self._step['name']] = self._step['start']
 
-    def set_modes(self, **kwargs):
-        ''' setter func for modes'''
-        for key,val in kwargs.items():
-            if key in self._modes.keys():
-                if val in self.valids[key]:
-                    self._modes[key] = val
-                else:
-                    log.error(f'{val} is no valid mode for {key}!')
+    def get_step(self):
+        ''' getter for step vars'''
+        return {k: v for k, v in self._step.items() if k != 'values'}
 
-    def set_volts(self, **kwargs):
-        ''' setter func for volts'''
-        for key,val in kwargs.items():
-            if key in self._volts.keys():
-                if isinstance(val,(int,float)):
-                    self._volts[key] = val
-                else:
-                    log.error(f'Value of {key} must be float or integer!')
+    def init_wps(self):
+        ''' Initialize start and stop working points for map '''
+        super().init_wps()
+        # set start of step var
+        if self._step['name'] in self._wp_params:
+            self.wp_start.set(**{self._step['name'] : self._step['start']})
+            self.wp_stop.set(**{self._step['name'] : self._step['start']})
 
-    def set_lockin(self, **kwargs):
-        ''' setter func for lockin signal'''
-        for key,val in kwargs.items():
-            if key in self._lockin.keys():
-                if isinstance(val,(int,float)):
-                    self._lockin[key] = val
-                else:
-                    log.error(f'Value of {key} must be float or integer!')
+    def sweep_to_startpoint(self):
+        ''' start sweep from adwin outputs to the first wp of the measurement'''
+        super().sweep_to_startpoint()
+        # Wait for init time at first step
+        try:
+            init_time = self._step['init_time']
+            log.info(f"Waiting at first step for init_time {init_time:.2f}s.")
+            time.sleep(init_time)
+        except:
+            assert Exception("No init_time set in step parameters!")
 
-    def set_data(self, **kwargs):
-        ''' setter func for data measurement, saving and live plotting'''
-        for key,val in kwargs.items(): # keys: temp_save, save, plot
-            if key in self._data.keys(): 
-                for key1,val1 in val.items():   # keys: inph, quad, raw, amp, phase
-                    if (key1 in self.valids['calc']) or (key1 in self.valids['inputs']):
-                        for key2 in val1:       # keys: trace, retrace, difference
-                            if key2 in self.valids['traces']:
-                                self._data[key][key1].append(key2)
-                            else:
-                                log.error(f'{key2} is no valid input for {key}_{key1}!')
-                    else:
-                        log.error(f'{key1} is not defined in vars of {key}!')
-            else:
-                log.error(f'{key} is not defined!')
+    def wp_setter(self, x=None):
+        ''' set new step val of step var for wp'''
+        if self._inputs['retrace']:
+            temp_wp_outs = self.wp_start.outs
+        else:
+            temp_wp_outs = self.wp_stop.outs
+        if self._step['name'] in self._wp_params:
+            self.set_start_wp(**{self._step['name']: x})
+            self.set_stop_wp(**{self._step['name']: x})
+        # calculate duration to go to next wp
+        dur = 0.01 # min duration values: if zero the sweep might not happen -> fix in driver?!
+        for key, val in self.wp_start.outs.items():
+            dur_by_rate = abs(val - temp_wp_outs[key]) / self.valids['maxrate'][key]
+            dur = max(dur, dur_by_rate)
+        self.adwin.sweep(self.wp_start.outs, duration=dur)
+        # implement wait time
+        if self._step['wait_time']:
+            time.sleep(self._step['wait_time'])
 
-    def set_sph(self, **kwargs):
-        ''' update all given spherical b parameters '''
-        for key,val in kwargs.items():
-            if key in self._sph.keys():
-                if isinstance(val,(int,float)):
-                    self._sph[key] = val
-                else:
-                    log.error(f'Value of {key} must be float or integer!')
+    def set_parameter(self):
+        ''' prepare x/y parameter for measurement'''
+        # x: step dimension (uses wp_setter), y: fast sweep dimension
+        self.tune.set_x_parameters(self._step['values'], self._step['name'], self.wp_setter, self._step['unit'])
+        self.tune.set_y_parameters(self._sweep['values'], self._sweep['name'], None, self._sweep['unit'])
+        self._x_parameter = self.tune._x_parameter
+        self._y_parameter = self.tune._y_parameter
+
+    def add_view(self):
+        ''' add 1D and 2D views'''
+        for key in self._save:
+            trd = self._save.get(key,[])
+            if trd:
+                view = self.tune._data_file.add_view(
+                    name=key,
+                    x=self.tune._coordinates[self._y_parameter.name],
+                    y=self.tune._datasets['measure_trace.' + key]
+                )
+            if 'retrace' in trd:
+                view.add(
+                    x=self.tune._coordinates[self._y_parameter.name],
+                    y=self.tune._datasets['measure_retrace.' + key]
+                )
+            if "difference" in trd:
+                self.tune._data_file.add_view(
+                    name=key+'_difference',
+                    x=self.tune._coordinates[self._y_parameter.name],
+                    y=self.tune._datasets['calc_difference.' + key]
+                )
+        if 'amp_difference' in self.inputs_dict:
+            if 'deg' in self._step.get('unit', '') or '°' in self._step.get('unit', ''):
+                self.tune._data_file.add_polarview(
+                    name='polar_colormap',
+                    x=self.tune._coordinates[self._x_parameter.name],
+                    y=self.tune._coordinates[self._y_parameter.name],
+                    z=self.tune._datasets['calc_difference.amp_difference']
+                )
 
     def save_config(self):
-        ''' save measurement config in dataset of .h/hdf5 file'''
-        save = self.datafile.add_config()
-        save.add('ds_type','config')
-        save.add('sph',self.get_sph())
-        save.add('sweep',self.get_sweep())
-        save.add('step',self.get_step())
-        save.add('modes',self.get_modes())
-        save.add('volts',self.get_volts())
-        save.add('lockin',self.get_lockin())
-        save.add('inputs',self.get_inputs())
-        save.add('data',self.get_data())
-        save.add('soft_config',self.get_soft_config())
-        save.add('hard_config',self.get_hard_config())
+        super().save_config()
+        self.save.add('step', self.get_step())
 
-    def load_config(self,h5_path):
-        ''' load measurement config from .h/hdf5 file'''
-        try:
-            hf = h5py.File(h5_path)
-            config_ds = hf["entry/data0/measurement.config"]
-            config = {}
-            for key,val in config_ds.attrs.items():
-                try:
-                    config[key] = json.loads(val)
-                except:
-                    pass
-            log.info('Load measurement config from .h/hdf5 file...')
-            if 'hard_config' not in config.keys():
-                log.error('Could not load hard_config for adwin!')
-            if 'soft_config' not in config.keys():
-                log.error('Could not load soft_config for adwin!')
-            self.set_(**config)
-            log.info('Config from .h/hdf5 file loaded.')
-        except ImportError:
-            log.error('Load config from .h/hdf5 file failed!')
+    def start_measurement(self):
+        ''' start activated measurement'''
+        self.save_config()
+        self.tune.measure2D(self._plot_dss, readout_dur=1/self._sweep_readout_freq if self._sweep_readout_freq != 0 else 0,
+                            stop_event=self.stop_event)
