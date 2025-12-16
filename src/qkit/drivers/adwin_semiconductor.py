@@ -76,12 +76,12 @@ import math
 import os
 #from scipy.signal import medfilt   # median filter for triggered readout averaging 
 
-################################################################################################
-# Current qkit repository
-qkit_dir = Path(qkit.__file__).resolve().parent
-###############################################################################################
+# current directory of driver
+module_dir = Path(__file__).parent
+# directory of adbasic files and coil params
+adbasic_dir = module_dir / 'adwinlib' / 'semiconductor'
 
-class ADwin_Pro2_V3(Instrument):
+class adwin_semiconductor(Instrument):
     """
            DOCUMENTATION
 
@@ -134,20 +134,20 @@ class ADwin_Pro2_V3(Instrument):
     """
         
     def __init__(self,
-                 name='ADwin_Pro2_V3',
+                 name='adwin_semiconductor',
                  processnumber_main=1,
-                 processpath_main = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ramp_input_V3.TC1',
+                 processpath_main = adbasic_dir / 'ramp_input_V3.TC1',
                  process_number_triggered=2,
-                 process_path_triggered = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_V3.TC2',
+                 process_path_triggered = adbasic_dir / 'ADCF_Burst_Event_V3.TC2',
                  process_number_aquisition=3,
-                 process_path_aquisition = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_Stopp_V3.TC3',
+                 process_path_aquisition = adbasic_dir / 'ADCF_Burst_Event_Stopp_V3.TC3',
                  process_number_continuous=4,
                  watch_sampling_f="10kHz",
-                 process_path_continuous_2kHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_2kHz_V3.TC4',
-                 process_path_continuous_10kHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_10kHz_V3.TC4',
-                 process_path_continuous_100kHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_100kHz_V3.TC4',
-                 process_path_continuous_1MHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_1MHz_V3.TC4',
-                 process_path_continuous_4MHz = str(qkit_dir) + '/drivers/ADwin_Pro/ADbasic_files/main/ADCF_continuous_4MHz_V3.TC4',
+                 process_path_continuous_2kHz = adbasic_dir / 'ADCF_continuous_2kHz_V3.TC4',
+                 process_path_continuous_10kHz = adbasic_dir / 'ADCF_continuous_10kHz_V3.TC4',
+                 process_path_continuous_100kHz = adbasic_dir / 'ADCF_continuous_100kHz_V3.TC4',
+                 process_path_continuous_1MHz = adbasic_dir / 'ADCF_continuous_1MHz_V3.TC4',
+                 process_path_continuous_4MHz = adbasic_dir / 'ADCF_continuous_4MHz_V3.TC4',
                  devicenumber=1,
                  bootload=True,
                  global_lower_limit_in_V=0,
@@ -197,7 +197,7 @@ class ADwin_Pro2_V3(Instrument):
             
         if import_coil_params==True:
             try:
-                from ADwin_Pro.coil_params.ADwin_Pro2_coil_params import translation_factor_x, translation_factor_y, translation_factor_z, x_calib, y_calib, z_calib, x_max_current, y_max_current, z_max_current
+                from qkit.drivers.adwinlib.semiconductor.coil_params.ADwin_Pro2_coil_params import translation_factor_x, translation_factor_y, translation_factor_z, x_calib, y_calib, z_calib, x_max_current, y_max_current, z_max_current
                 self.translation_factor_x = translation_factor_x
                 self.translation_factor_y = translation_factor_y
                 self.translation_factor_z = translation_factor_z
@@ -434,7 +434,7 @@ class ADwin_Pro2_V3(Instrument):
         self.adw.Boot(btl_dir) 
 
     def start_process(self):
-        """start process (done automatically when creating ADwin_ProII instance)
+        """start process (done automatically when creating adwin_semiconductor instance)
         """
         self.stop_process()
         logging.info(__name__ +': starting process')
@@ -1935,7 +1935,7 @@ if __name__ == "__main__":
                    # IF reboot = True you have to use the next cell to initialize the gates. 
 
     bill = qkit.instruments.create('bill',
-        'ADwin_Pro2_V3',
+        'adwin_semiconductor',
         bootload=reboot,
         watch_sampling_f="10kHz",
         global_lower_limit_in_V=-5,
@@ -2009,9 +2009,9 @@ if __name__ == "__main__":
     # print(bill.set_input1_repeats_triggered_readout(5))
     # print(bill.get_input1_repeats_triggered_readout())
     bill.initialize_triggered_readout(process_number_triggered=2,
-                                      process_path_triggered='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_V3.TC2',
+                                      process_path_triggered= adbasic_dir / 'ADCF_Burst_Event_V3.TC2',
                                       process_number_aquisition=3,
-                                      process_path_aquisition='C:/Users/nanospin/SEMICONDUCTOR/qkit/qkit/drivers/ADwin_Pro/ADbasic_files/main/ADCF_Burst_Event_Stopp_V3.TC3'
+                                      process_path_aquisition= adbasic_dir / 'ADCF_Burst_Event_Stopp_V3.TC3'
                                       )
     bill.start_triggered_readout()
     bill.check_finished_triggered_readout()
