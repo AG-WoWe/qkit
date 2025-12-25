@@ -2,6 +2,7 @@
     the measurement script '''
 
 from ast import literal_eval
+from pathlib import Path
 import h5py
 import json
 import numpy as np
@@ -14,16 +15,32 @@ class DataIntegrityError(Exception):
         sized of datasets '''
     pass
 
+def fetch_qkit_path():
+    for path in Path.cwd().parents:
+        if path.match('qkit'):
+            return path
+
 class MapSTExtractor:
     ''' Extract sweep, step and data from hdf file containg map from ST '''
-    def __init__(self, fpath, mfunc='sweep_measure'):
-        self._h5 = h5py.File(fpath, mode='r')
+    def __init__(self, fpath, path_mode='relative', mfunc='sweep_measure'):
+        if path_mode == 'relative':
+            self.fpath = fetch_qkit_path() / Path(fpath)
+        elif path_mode == 'absolute':
+            self.fpath = Path(fpath)
+        else:
+            raise ValueError('path_mode must be "relative" or "absolute"')
+
+        self._h5 = h5py.File(self.fpath, mode='r')
         self._h5data0 = self._h5[HDF_DATA_DIR]
         self._mfunc = mfunc
 
         mvars = self.list_mvars()
         for mv in mvars:
             self.list_dirns(mv)
+
+    def get_file_path(self):
+        ''' Return path of h5 file '''
+        return self.fpath
 
     def list_mvars(self, echo:bool=True):
         ''' Returns and prints list of mvars in h5 file '''
@@ -83,6 +100,11 @@ class MapSTExtractor:
         dataset = self._h5data0.get(self._get_ds_url(mvar, dirn))
         # get metadata
         metadata = self._get_metadata(dataset)
+        try:
+            if metadata['is_axis_reversed']:
+                return np.flip(np.array(dataset, dtype=dataset.attrs.get('dtype')), axis=1), metadata
+        finally:
+            pass
         return np.array(dataset, dtype=dataset.attrs.get('dtype')), metadata
 
     def get_data_dict(self, mvars:list=None, dirns:list=None):
@@ -135,6 +157,14 @@ class MapSTExtractor:
         ''' Return sweep rate of measurement '''
         return self.get_measurement_config()['sweep']['rate']
 
+    def get_lockin_amplitude(self):
+        ''' Return lockin amplitude of measurement '''
+        return self.get_measurement_config()['lockin']['amp']
+
+    def get_lockin_bias(self):
+        ''' Return lockin amplitude of measurement '''
+        return self.get_measurement_config()['volts']['vd']
+
     def get_maf_time(self):
         ''' Return sweep rate of measurement '''
         conf = self.get_measurement_config()
@@ -143,7 +173,10 @@ class MapSTExtractor:
         return maf_val / freq
 
     def _get_ds_url(self, mvar, dirn):
-        return f'{self._mfunc}.{mvar}_{dirn}'
+        if self._mfunc == 'sweep_measure':
+            return f'{self._mfunc}.{mvar}_{dirn}'
+        elif self._mfunc == 'measure_':
+            return f'{self._mfunc}{dirn}.{mvar}_{dirn}'
 
     def _get_metadata(self, dataset:h5py.Dataset):
         return dict(dataset.attrs.items())

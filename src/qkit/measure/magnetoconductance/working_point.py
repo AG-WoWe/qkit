@@ -18,7 +18,17 @@ __all__ = ['VectorMagnet3D', 'WorkingPoint']
 __version__ = '0.1_20240515'
 __author__ = 'Luca Kosche'
 
-from numpy import cos, sin, pi, NaN
+from numpy import (
+    arccos,
+    arctan2,
+    array,
+    clip,
+    cos,
+    dot,
+    sin,
+    pi,
+    NaN,
+)
 
 class MagnetUnderdefinedError(Exception):
     """ Error which is thrown when the VectorMagnet has not enough
@@ -27,6 +37,10 @@ class MagnetUnderdefinedError(Exception):
 def grad2rad(grad):
     """ Transform angle in grad to rad """
     return grad * 2 * pi / 360
+
+def rad2grad(rad):
+    """ Transform angle in rad to grad """
+    return rad * 360 / (2 * pi)
 
 class VectorMagnet3D():
     ''' The vectormagnet class is designed to translate 3D B-field
@@ -97,6 +111,56 @@ class VectorMagnet3D():
         ''' update all given spherical b parameters '''
         for key, val in kwargs.items():
             self._sph[key] = val
+
+    def _transform_bt_to_normal_mode(self, theta: float, phi: float, psi: float):
+        '''Return (theta, phi, psi) for normal mode matching sweep-mode Bt.'''
+        theta_rad = grad2rad(theta)
+        phi_rad = grad2rad(phi)
+        psi_rad = grad2rad(psi)
+
+        e_r = array([
+            sin(theta_rad) * cos(phi_rad),
+            sin(theta_rad) * sin(phi_rad),
+            cos(theta_rad),
+        ])
+        e_theta = array([
+            cos(theta_rad) * cos(phi_rad),
+            cos(theta_rad) * sin(phi_rad),
+            -sin(theta_rad),
+        ])
+        e_phi = array([
+            -sin(phi_rad),
+            cos(phi_rad),
+            0.0,
+        ])
+
+        bt_dir = cos(psi_rad) * e_theta + sin(psi_rad) * e_phi
+
+        theta_norm = arccos(clip(bt_dir[2], -1.0, 1.0))
+        phi_norm = arctan2(bt_dir[1], bt_dir[0])
+        if phi_norm < 0:
+            phi_norm += 2 * pi
+
+        e_theta_norm = array([
+            cos(theta_norm) * cos(phi_norm),
+            cos(theta_norm) * sin(phi_norm),
+            -sin(theta_norm),
+        ])
+        e_phi_norm = array([
+            -sin(phi_norm),
+            cos(phi_norm),
+            0.0,
+        ])
+
+        c_theta = dot(e_r, e_theta_norm)
+        c_phi = dot(e_r, e_phi_norm)
+        psi_norm = arctan2(c_phi, c_theta)
+
+        return {
+            'theta': rad2grad(theta_norm),
+            'phi': rad2grad(phi_norm) % 360,
+            'psi': rad2grad(psi_norm) % 360,
+        }
 
     def calc_cartesian(self, **kwargs):
         ''' Use the current magnet field setpoint to calculate the
