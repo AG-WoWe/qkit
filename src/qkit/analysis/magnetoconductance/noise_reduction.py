@@ -193,7 +193,7 @@ def remove_sharp_noise_peaks(
         proms = props["prominences"]
         ax_promhist.hist(proms, bins=50)
     if ax_results:
-        if x:
+        if x is not None:
             ax_results.plot(x, y, label='raw')
             ax_results.plot(x, result, label='result')
             ax_results.legend()

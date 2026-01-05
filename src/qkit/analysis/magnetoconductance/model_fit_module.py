@@ -26,10 +26,6 @@ DEFAULT_PARAMS = {
     'fp_distance': 0.2, # Minimum seperation of conductance levels
     'bins': 100,        # bins of conductance histogram
     'penalty': 50,      # penalty for jumps in model fit
-    'manual_fixes': {'no_jumps': [],
-                    'wp_shift': [],
-                    'cond_override': {}
-                    }
 }
 
 basepath = qkit_path() / 'data'
@@ -37,7 +33,7 @@ subpath = Path(f'{RUN_ID}/{SUBFOLDER}/{name}')
 lpath = basepath / subpath
 
 def evalue_jumps_by_model(
-    lpath, mvar, dirns, params=DEFAULT_PARAMS, idc='all', plot:int=False,
+    lpath, mvar, dirns, params=DEFAULT_PARAMS, idc='all', plot=False,
     save=False):
     ''' If ifc is 'all', evaluate all available steps. If it is a list or int,
         the corresponding ones will be caluclated. If you want to plot
@@ -60,7 +56,7 @@ def evalue_jumps_by_model(
     if isinstance(idc, (int, np.int64)):
         idc_list = [idc]
     elif idc == 'all':
-        if isinstance(plot, int):
+        if isinstance(plot, int) and not isinstance(plot, bool):
             idc_list = [plot]
         else:
             idc_list = range(len(step))
@@ -74,18 +70,13 @@ def evalue_jumps_by_model(
         results = {'step': step, 'sweep': sweep}
 
         # Test plotter for debugging
-        if isinstance(plot, int):
+        if isinstance(plot, int) and not isinstance(plot, bool):
             fig, axes = plt.subplots(4, figsize=(8,12))
         else:
             axes = [None, None, None, None]
 
-
         #loop over requested indices
         for idx in idc_list:
-
-            # HANDLE EXCEPTIONS Seperately
-            if idx in params['manual_fixes']['no_jumps'] or idx in params['manual_fixes']['wp_shift']:
-                continue
 
             # LOAD DATA
             print('Bp =', step[idx], 'idx =', idx)
@@ -97,7 +88,7 @@ def evalue_jumps_by_model(
             if params['sigma'] is not None:
                 y = gaussian_filter(y, params['sigma'])
             # REMOVE SHARP NOISE PEAKS HAS A LOT OF DEFUALT ARGUMENTS WHICH USUALLY DONT NEED TO BE PROVIDED
-            y = remove_sharp_noise_peaks(y, params['fs'], ax_results=axes[0])
+            y = remove_sharp_noise_peaks(y, params['fs'], ax_results=axes[0], x=x)
 
             # STEP 1.5 : REMOVE LINEAR BACKGROUND 
             y, m, b_center, gap = remove_linear_slope(
@@ -106,26 +97,7 @@ def evalue_jumps_by_model(
             )
 
             # Step 2: FIT MODEL
-            man_cond_ovrd = params['manual_fixes']['cond_override']
-            if 'all' in man_cond_ovrd:
-                cond_lvls = {}
-            else:
-                cond_lvls = fit_two_states(y, params['bins'], fp_distance=params['fp_distance'], ax=axes[2])
-                #print(f" std1 = {cond_lvls['std1']}, std2 = {cond_lvls['std2']}")
-            if idx in man_cond_ovrd:
-                if 'high' in man_cond_ovrd[idx]:
-                    cond_lvls['mu2'] = man_cond_ovrd[idx]['high']
-                    cond_lvls['std2'] = man_cond_ovrd['std']
-                if 'low' in man_cond_ovrd[idx]:
-                    cond_lvls['mu1'] = man_cond_ovrd[idx]['low']
-                    cond_lvls['std1'] = man_cond_ovrd['std']
-            if 'all' in man_cond_ovrd:
-                if 'high' in man_cond_ovrd['all']:
-                    cond_lvls['mu2'] = man_cond_ovrd['all']['high']
-                    cond_lvls['std2'] = man_cond_ovrd['std']
-                if 'low' in man_cond_ovrd['all']:
-                    cond_lvls['mu1'] = man_cond_ovrd['all']['low']
-                    cond_lvls['std1'] = man_cond_ovrd['std']
+            cond_lvls = fit_two_states(y, params['bins'], fp_distance=params['fp_distance'], ax=axes[2])
             mean_std = np.mean([cond_lvls['std1'], cond_lvls['std2']])
 
             # calculate two state with linear slope solution
