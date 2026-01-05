@@ -137,11 +137,13 @@ def multitaper_psd(
     return freqs, Pxx
 
 def remove_sharp_noise_peaks(
-    time, data, fs, select:tuple, fft_res=2, fmin=1, Q=100, init_prom=1, promhist=True, plot=True):
+    y, fs, select:tuple=('nb_peaks', 15), fft_res=2, fmin=1, Q=100,
+    init_prom=1, ax_promhist=None, ax_results=None, x=None, ax_fft=None
+    ):
     ''' Remove sharp peaks in the frequency domain of a time trace by detecting
         the peaks and applying a cascade of notch filters on the time trace '''
     # Step 1: Calculate FFT in which we want to look for peaks
-    f, fft = multitaper_psd(data, fs, NW=fft_res)
+    f, fft = multitaper_psd(y, fs, NW=fft_res)
 
     # Step 2: Find Peaks in FFT
     # If select is prominence, select the peaks by prominence
@@ -183,25 +185,27 @@ def remove_sharp_noise_peaks(
     print(f'{len(fpeaks)} peaks selected with prominence above {min(proms)}')
 
     # Step 3: Apply notch filters for all peaks
-    result = notch_cascade(data, fs, fpeaks, Q)
+    result = notch_cascade(y, fs, fpeaks, Q)
 
     # Step 4: If plotting was request, do
-    if promhist:
+    if ax_promhist:
         _, props = find_peaks(np.log(fft), prominence=init_prom)
         proms = props["prominences"]
-        fig, ax = plt.subplots()
-        ax.hist(proms, bins=50)
-    if plot:
-        fig, [ax0, ax1] = plt.subplots(2)
-        ax0.plot(time, data, label='raw')
-        ax0.plot(time, result, label='result')
-        ax1.vlines(fpeaks, 0, 1, color='grey', alpha=0.5, transform=ax1.get_xaxis_transform())
-        ax1.plot(f, fft, label='raw')
+        ax_promhist.hist(proms, bins=50)
+    if ax_results:
+        if x:
+            ax_results.plot(x, y, label='raw')
+            ax_results.plot(x, result, label='result')
+            ax_results.legend()
+        else:
+            print('To plot results, also provide x array')
+    if ax_fft:
+        ax_fft.vlines(fpeaks, 0, 1, color='grey', alpha=0.5, transform=ax1.get_xaxis_transform())
+        ax_fft.plot(f, fft, label='raw')
         f, fft = multitaper_psd(result, fs, NW=fft_res)
-        ax1.plot(f, fft, label='result')
-        ax1.set_yscale('log')
-        ax1.set_xscale('log')
-        ax0.legend()
-        ax1.legend()
-        fig.tight_layout()
+        ax_fft.plot(f, fft, label='result')
+        ax_fft.set_yscale('log')
+        ax_fft.set_xscale('log')
+        ax_fft.legend()
+
     return result

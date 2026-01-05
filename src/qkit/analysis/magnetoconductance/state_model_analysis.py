@@ -197,7 +197,7 @@ def fit_two_state_fixed_slope(
     std_var,
     samples_per_full_slope,
     penalty,
-    plot=False,
+    ax=None,
     **pltkwargs
 ):
     """
@@ -254,16 +254,16 @@ def fit_two_state_fixed_slope(
         else:
             states[i] = v
 
-    if plot:
-        fig, ax0 = plt.subplots()
-        ax0.plot(x, y, label='data')
-        ax0.plot(x, y_fit, label='fit')
+    if ax:
+        ax.plot(x, y, label='data')
+        ax.plot(x, y_fit, label='fit')
         if 'xlabel' in pltkwargs:
-            ax0.set_xlabel(pltkwargs['xlabel'])
+            ax.set_xlabel(pltkwargs['xlabel'])
         if 'ylabel' in pltkwargs:
-            ax0.set_ylabel(pltkwargs['ylabel'])
+            ax.set_ylabel(pltkwargs['ylabel'])
 
     return y_fit, states
+    
 
 def reconstruct_yfit_from_jump_idc(t, jump_indicees, v_low, v_high, samples_per_full_slope):
     """
