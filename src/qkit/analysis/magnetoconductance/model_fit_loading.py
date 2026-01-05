@@ -2,14 +2,7 @@ import pickle
 import numpy as np
 from pathlib import Path
 
-def qkit_path():
-    for path in Path.cwd().parents:
-        if path.match('qkit'):
-            return path
-
-def load_model_fit(RUN_ID, SUBFOLDER, name, penalty, dirn=None):
-    dirn_appx = f'_dirn_{dirn}' if dirn is not None else ''
-    fpath = qkit_path() / Path(f'./data/{RUN_ID}/{SUBFOLDER}/{name.split("_")[0]}_model_fit_pen{penalty}{dirn_appx}.pkl')
+def load_model_fit(fpath):
     with open(fpath, 'rb') as f:
         loaded_dict = restructure(pickle.load(f))
         print(f'Found keys: {list(loaded_dict.keys())}')

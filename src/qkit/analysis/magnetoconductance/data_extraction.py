@@ -15,16 +15,19 @@ class DataIntegrityError(Exception):
         sized of datasets '''
     pass
 
-def fetch_qkit_path():
-    for path in Path.cwd().parents:
-        if path.match('qkit'):
-            return path
+def qkit_path() -> Path:
+    # find the first (highest in hierarchy) occurrence of "qkit" in parent directories
+    module_dir = Path(__file__).resolve().parent
+    for parent in module_dir.parents[::-1]:
+        if parent.name == 'qkit':
+            return parent
+    raise FileNotFoundError("Could not find 'qkit' directory in parent directories.")
 
 class MapSTExtractor:
     ''' Extract sweep, step and data from hdf file containg map from ST '''
     def __init__(self, fpath, path_mode='relative', mfunc='sweep_measure'):
         if path_mode == 'relative':
-            self.fpath = fetch_qkit_path() / Path(fpath)
+            self.fpath = qkit_path() / Path(fpath)
         elif path_mode == 'absolute':
             self.fpath = Path(fpath)
         else:
@@ -37,6 +40,13 @@ class MapSTExtractor:
         mvars = self.list_mvars()
         for mv in mvars:
             self.list_dirns(mv)
+
+    def device_settings(self, device:str):
+        ''' Return device settings dictionary '''
+        ds = self.get_dataset('measurement')
+        raw_rows = ds.asstr()[...]           # or ds[:].astype(str) on older h5py
+        device_settings = [json.loads(row) for row in raw_rows]
+        return device_settings[0]['instruments'][device]
 
     def get_file_path(self):
         ''' Return path of h5 file '''
@@ -77,13 +87,22 @@ class MapSTExtractor:
         # check number of steps in all measured datasets
         mds = [val for key, val in self._h5data0.items() if self._mfunc in key]
         no_steps = [ds.attrs.get('fill')[0] for ds in mds]
+        print(no_steps)
         # error if not all measurements have the same amount of steps
         if any(no_steps - no_steps[0]):
             print('ERROR: Not all measurements have the same amount of steps.')
-            raise DataIntegrityError
+            # check if the difference is only one so one retrace might be missing
+            if all(abs(n - no_steps[0]) <= 1 for n in no_steps):
+                print('Warning: One measurement seems to be missing one step. Continuing...')
+                # set the lowest number of steps as reference
+                available_steps = min(no_steps)
+            else:
+                raise DataIntegrityError
+        else:
+            available_steps = no_steps[0]
         # discard the steps which are not measured
-        if len(steps) != no_steps[0]:
-            steps = steps[:no_steps[0]]
+        if len(steps) != available_steps:
+            steps = steps[:available_steps]
         return steps, metadata
 
     def get_sweep(self):
@@ -118,9 +137,12 @@ class MapSTExtractor:
         for mvar in data_dict:
             mvar_dirns = dirns if dirns else self.list_dirns(mvar, echo=False)
             for dirn in mvar_dirns:
-                data, metadata = self.get_data(mvar, dirn)
-                data_dict[mvar][dirn] = data
-                metadata_dict[mvar][dirn] = metadata
+                try:
+                    data, metadata = self.get_data(mvar, dirn)
+                    data_dict[mvar][dirn] = data
+                    metadata_dict[mvar][dirn] = metadata
+                except AttributeError:
+                    print(f'Could not load data for "{mvar}/{dirn}"!')
         return data_dict, metadata_dict
 
     def get_measurement_config(self):
