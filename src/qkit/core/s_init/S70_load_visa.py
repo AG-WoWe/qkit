@@ -4,7 +4,8 @@
 """
 import qkit
 import logging
-
+from packaging.version import parse
+from importlib.metadata import version 
 
 def _load_visa():
     try:
