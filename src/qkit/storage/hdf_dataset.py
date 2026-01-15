@@ -50,6 +50,7 @@ class hdf_dataset(object):
         self.ds_type = ds_type
         self._next_matrix = False
         self._save_timestamp = save_timestamp
+        self.first = False
         
         ## only one information: either 'name' (for creation) or 'ds_url' (for readout)
         if (name and ds_url) or (not name and not ds_url) :
@@ -70,17 +71,17 @@ class hdf_dataset(object):
         self.first = True
 
     def _read_ds_from_hdf(self,ds_url):
-        ds = self.hf[str(ds_url)]
+        self.ds = self.hf[str(ds_url)]
 
-        for attr in ds.attrs.keys():
-            val = ds.attrs.get(attr)
+        for attr in self.ds.attrs.keys():
+            val = self.ds.attrs.get(attr)
             setattr(self,attr,val)
         
         self.ds_url =  ds_url
         
     def _setup_metadata(self):
         ds = self.ds
-        ds.attrs.create('ds_type',self.ds_type)            
+        ds.attrs.create('ds_type',self.ds_type)
         ds.attrs.create("comment",self.comment.encode())
         ds.attrs.create('ds_url',self.ds_url.encode())
         if self.ds_type != ds_types['txt']:
@@ -91,6 +92,8 @@ class hdf_dataset(object):
                 ds.attrs.create("y_ds_url",self.y_object.ds_url.encode())
             if self.z_object:
                 ds.attrs.create("z_ds_url",self.z_object.ds_url.encode())
+        if self.meta.get("is_axis_reversed", None) is not None:
+            ds.attrs.create("is_axis_reversed", self.meta.pop("is_axis_reversed"))
 
 
     def next_matrix(self):

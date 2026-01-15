@@ -1,3 +1,4 @@
+import string
 import qkit.measure.measurement_base as mb
 
 class Sequential_multiplexer:
@@ -29,6 +30,8 @@ class Sequential_multiplexer:
     def __init__(self):
         self.registered_measurements = {}
         self.no_measurements = 0
+        self.registered_trigger = {}
+        self.no_triggers = 0
     
     @property
     def no_active_nodes(self):
@@ -131,17 +134,14 @@ class Sequential_multiplexer:
         datasets : list(qkit.measure.measurement_base.MeasureBase.Data)
         """
         datasets = []
-        # print(coords)
         for name, measurement in self.registered_measurements.items():
-            # print(name, measurement)
             if measurement["active"]:
                 for node, unit in measurement["nodes"].items():
-                    # print(node,unit)
                     datasets.append(mb.MeasureBase.Data(name = f"{name}.{node}",
                                               coords = coords,
                                               unit = unit,
-                                              save_timestamp = False))
-        # print(datasets)
+                                              save_timestamp = False,
+                                              is_axis_reversed = True if "retrace" in name else False))
         assert datasets, f"{__name__}: Tried to initialize an empty measurement dataset. Register and/or activate measurements."
         return datasets
     
@@ -159,4 +159,132 @@ class Sequential_multiplexer:
                 temp = measurement["get_tracedata_func"]()
                 for node, value in temp.items():
                     latest_data[f"{name}.{node}"] = value
+        return latest_data
+    
+    def register_trigger(self, name, get_tracedata_func, *args, **kwargs):
+        """
+        Registers a trigger.
+
+        Parameters
+        ----------
+        name : string
+            Name of the trigger which is to be registered.
+        get_tracedata_func : callable
+            Callable object which produces the data for the measurement which is to be registered.
+        *args, **kwargs:
+            Additional arguments which are passed to the get_tracedata_func during registration.
+        -------
+        """
+        if type(name) != str:
+            raise TypeError(f"{__name__}: {name} is not a valid experiment name. The experiment name must be a string.")
+        if not callable(get_tracedata_func):
+            raise TypeError("%s: Cannot set %s as get_value_func. Callable object needed." % (__name__, get_tracedata_func))
+        
+        self.registered_trigger[name] = {"get_tracedata_func" : lambda: get_tracedata_func(*args, **kwargs), "active" : False}
+        self.no_triggers = len(self.registered_trigger)
+
+    def activate_trigger(self, name):
+        """
+        Activates the given trigger.
+
+        Parameters
+        ----------
+        name : string
+            Name of the trigger which is to be activated.
+        -------
+        Raises
+        ------
+        KeyError
+            If the given trigger doesn't exist.
+        """
+        if name not in self.registered_trigger.keys():
+            raise KeyError(f"{__name__}: {name} is not a registered trigger. Cannot activate.")
+        self.registered_trigger[name]["active"] = True
+
+    def deactivate_trigger(self, name):
+        """
+        Deactivates the given trigger.
+
+        Parameters
+        ----------
+        name : string
+            Name of the trigger which is to be deactivated.
+        -------
+        Raises
+        ------
+        KeyError
+            If the given trigger doesn't exist.
+        """
+        if name not in self.registered_trigger.keys():
+            raise KeyError(f"{__name__}: {name} is not a registered trigger. Cannot deactivate.")
+        self.registered_trigger[name]["active"] = False
+
+    def trigger(self):
+        """
+        Sequentially calls the trigger functions of each active trigger.
+
+        Returns
+        -------
+        latest_data : dict()
+        """
+        latest_data = {}
+        for name, trigger in self.registered_trigger.items():
+            if trigger["active"]:
+                trigger["get_tracedata_func"]()
+        return latest_data
+
+    def get_active_triggers(self):
+        """
+        Gibt eine Liste aller aktiven Trigger-Namen zurück.
+        """
+        return [name for name, trig in self.registered_trigger.items() if trig["active"]]
+
+    def get_active_measurements(self):
+        """
+        Gibt eine Liste aller aktiven Messungen zurück.
+        """
+        return [name for name, meas in self.registered_measurements.items() if meas["active"]]
+
+    def trigger_with_index(self, index):
+        """
+        Calls the trigger function with index of active triggers.
+
+        Parameters
+        ----------
+        index : int
+            Index of the trigger which is to be called.
+
+        Returns
+        -------
+        direction : int
+        """
+        direction = 0
+        active_triggers = self.get_active_triggers()
+        if index < len(active_triggers):
+            name = active_triggers[index]
+            trigger = self.registered_trigger[name]
+            direction = trigger["get_tracedata_func"]()
+        return direction
+
+    def measure_with_index(self, index):
+        """
+        Calls the measurement function with index of active measurements.
+
+        Parameters
+        ----------
+        index : int
+            Index of the measurement which is to be called.
+
+        Returns
+        -------
+        latest_data : dict()
+        """
+        latest_data = {}
+        active_measurements = self.get_active_measurements()
+        if index < len(active_measurements):
+            name = active_measurements[index]
+            measurement = self.registered_measurements[name]
+            temp = measurement["get_tracedata_func"]()
+            for node, value in temp.items():
+                latest_data[f"{name}.{node}"] = value
         return latest_data
