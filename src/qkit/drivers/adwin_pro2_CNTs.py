@@ -1561,7 +1561,7 @@ class ADwin_Pro2_V3_CNTs(Instrument):
                 for output in range(1,8+1):
                     self.set('gate%d_module_number'% gate, module)
                     self.set('gate%d_output_number'% gate, output)
-                    if module == 1 and gate in [1, 2, 3]:
+                    if module == 1 and gate in [1, 3, 5]:
                         self.set('gate%d_safe_port'% gate, 1)    
                     gate = gate +1
                 
@@ -1569,7 +1569,7 @@ class ADwin_Pro2_V3_CNTs(Instrument):
             for output in range(1, rest+1):
                 self.set('gate%d_module_number'% gate, full_modules+1)
                 self.set('gate%d_output_number'% gate, output)
-                if module == 1 and gate in [1, 2, 3]:
+                if module == 1 and gate in [1, 3, 5]:
                         self.set('gate%d_safe_port'% gate, 1) 
                 gate = gate +1
                 
