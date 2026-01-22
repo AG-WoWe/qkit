@@ -76,42 +76,42 @@ class Sequential_multiplexer:
         ALLOWED_ORDER = ["trace", "retrace", "difference"]
         ALLOWED_SET = set(ALLOWED_ORDER)
         if modes is None:
-            return None
-    
-        if not isinstance(modes, (list, tuple)):
-            raise TypeError("modes must be a list of strings or None")
-    
-        # Check types
-        for m in modes:
-            if not isinstance(m, str):
-                raise TypeError(f"Invalid mode type: {m!r} (must be str)")
-    
-        # Check allowed values
-        invalid = [m for m in modes if m not in ALLOWED_SET]
-        if invalid:
-            raise ValueError(f"Invalid mode(s): {invalid}. Allowed: {ALLOWED_ORDER}")
-    
-        # Remove duplicates while preserving first occurrence (optional but usually wise)
-        seen = set()
-        unique = []
-        for m in modes:
-            if m not in seen:
-                seen.add(m)
-                unique.append(m)
-    
-        # Reorder according to required order
-        reordered = [m for m in ALLOWED_ORDER if m in unique]
-    
-        # Check that the reordered list matches a valid prefix
-        # i.e. no gaps like ["trace", "difference"] without "retrace"
-        expected_prefix = ALLOWED_ORDER[:len(reordered)]
-        if reordered != expected_prefix:
-            raise ValueError(
-                f"Invalid mode combination/order: {modes}. "
-                f"Valid options are prefixes of {ALLOWED_ORDER}"
-            )
-    
-        modes = reordered
+            pass
+        else:
+            if not isinstance(modes, (list, tuple)):
+                raise TypeError("modes must be a list of strings or None")
+        
+            # Check types
+            for m in modes:
+                if not isinstance(m, str):
+                    raise TypeError(f"Invalid mode type: {m!r} (must be str)")
+        
+            # Check allowed values
+            invalid = [m for m in modes if m not in ALLOWED_SET]
+            if invalid:
+                raise ValueError(f"Invalid mode(s): {invalid}. Allowed: {ALLOWED_ORDER}")
+        
+            # Remove duplicates while preserving first occurrence (optional but usually wise)
+            seen = set()
+            unique = []
+            for m in modes:
+                if m not in seen:
+                    seen.add(m)
+                    unique.append(m)
+        
+            # Reorder according to required order
+            reordered = [m for m in ALLOWED_ORDER if m in unique]
+        
+            # Check that the reordered list matches a valid prefix
+            # i.e. no gaps like ["trace", "difference"] without "retrace"
+            expected_prefix = ALLOWED_ORDER[:len(reordered)]
+            if reordered != expected_prefix:
+                raise ValueError(
+                    f"Invalid mode combination/order: {modes}. "
+                    f"Valid options are prefixes of {ALLOWED_ORDER}"
+                )
+        
+            modes = reordered
 
         self.registered_measurements[name] = {"nodes" : nodes, "get_tracedata_func" : lambda: get_tracedata_func(*args, **kwargs), "active" : False}
         self.no_measurements = len(self.registered_measurements)
