@@ -246,10 +246,10 @@ class Tuning_CNTs(Tuning):
                 qkit.flow.sleep(self._x_parameter.wait_time)
                 
                 if modes is None:
-                    sweepy[0] = self._prepare_empty_container()
+                    sweepy.append(self._prepare_empty_container())
                 elif isinstance(modes, list):           
                     for i, val in enumerate(modes):
-                        sweepy[i] = self._prepare_empty_container(val)
+                        sweepy.append(self._prepare_empty_container(val))
                 
                 if modes is None:
                     for y in y_vals:
@@ -406,10 +406,10 @@ class Tuning_CNTs(Tuning):
                     self._y_parameter.set_function(y)
                     qkit.flow.sleep(self._y_parameter.wait_time)
                     if modes is None:
-                        sweepy[0] = self._prepare_empty_container()
+                        sweepy.append(self._prepare_empty_container())
                     elif isinstance(modes, list):           
                         for i, val in enumerate(modes):
-                            sweepy[i] = self._prepare_empty_container(val)                 
+                            sweepy.append(self._prepare_empty_container(val))                 
                     
                     if modes is None:
                         for z in z_vals:
