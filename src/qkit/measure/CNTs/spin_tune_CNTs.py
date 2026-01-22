@@ -73,8 +73,15 @@ class Tuning_CNTs(Tuning):
                     else:
                         raise TypeError("The modes should be defined as None or as a str list!")
         return sweepy
-            
 
+    
+    def _append_value(self, latest_data, container):
+        for name, values in latest_data.items():
+            self.watchdog.limits_check(name, values)
+        for name, values in container
+            container.append(float(values))
+
+    
     def measure1D(self, modes=None, data_to_show = None):
         """
         Starts a 1D - measurement, along the x coordinate with the respecting mode
