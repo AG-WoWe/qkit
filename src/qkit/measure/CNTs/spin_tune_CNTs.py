@@ -101,13 +101,13 @@ class Tuning_CNTs(Tuning):
             difference = False
             
             if modes is None:
-                sweepy[0] = self._prepare_empty_container()
+                sweepy.append(self._prepare_empty_container())
             elif isinstance(modes, list):
                 if "difference" in modes:
                     difference = True
                     modes.remove("difference")
                 for i, val in enumerate(modes):
-                    sweepy[i] = self._prepare_empty_container(val)
+                    sweepy.append(self._prepare_empty_container(val))
             
             # if modes in (None, "trace"):
             #     sweep_trace = self._prepare_empty_container()
