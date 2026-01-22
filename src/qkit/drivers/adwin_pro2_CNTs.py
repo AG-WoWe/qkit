@@ -72,7 +72,7 @@ from pathlib import Path
 #from scipy.signal import medfilt   # median filter for triggered readout averaging 
 
 
-class ADwin_Pro2_V3_CNTs(Instrument):
+class adwin_pro2_CNTs(Instrument):
     """
            DOCUMENTATION
 
