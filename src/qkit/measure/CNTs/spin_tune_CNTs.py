@@ -75,11 +75,10 @@ class Tuning_CNTs(Tuning):
         return sweepy
 
     
-    def _append_value(self, latest_data, container):
+    def _append_value(self, latest_data, container, modes=None):
         for name, values in latest_data.items():
             self.watchdog.limits_check(name, values)
-        name, values = container.items()
-        container[f"{name}"].append(float(values))
+            container[f"{name}.{modes}"].append(float(values))
 
     
     def measure1D(self, modes=None, data_to_show = None):
@@ -145,7 +144,7 @@ class Tuning_CNTs(Tuning):
                         self._x_parameter.set_function(x)
                         qkit.flow.sleep(self._x_parameter.wait_time)
                         latest = self.multiplexer.measure()
-                        self._append_value(latest, sweepy[i])
+                        self._append_value(latest, sweepy[i], modes = val)
                         pb.iterate(addend=len(latest))
         
                         if self.watchdog.stop:
@@ -282,7 +281,7 @@ class Tuning_CNTs(Tuning):
                             self._y_parameter.set_function(y)
                             qkit.flow.sleep(self._y_parameter.wait_time)
                             latest = self.multiplexer.measure()
-                            self._append_value(latest, sweepy[i])
+                            self._append_value(latest, sweepy[i], modes = val)
                             pb.iterate(addend=len(latest))
             
                             if self.watchdog.stop:
@@ -442,7 +441,7 @@ class Tuning_CNTs(Tuning):
                                 self._z_parameter.set_function(z)
                                 qkit.flow.sleep(self._z_parameter.wait_time)
                                 latest = self.multiplexer.measure()
-                                self._append_value(latest, sweepy[i])
+                                self._append_value(latest, sweepy[i], modes = val)
                                 pb.iterate(addend=len(latest))
                 
                                 if self.watchdog.stop:
