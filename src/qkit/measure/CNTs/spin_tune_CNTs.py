@@ -78,7 +78,6 @@ class Tuning_CNTs(Tuning):
     def _append_value(self, latest_data, container):
         for name, values in latest_data.items():
             self.watchdog.limits_check(name, values)
-        for name, values in container
             container.append(float(values))
 
     
