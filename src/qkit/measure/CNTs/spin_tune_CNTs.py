@@ -55,7 +55,7 @@ class Tuning_CNTs(Tuning):
         -------
         None
         """
-        self.multiplexer.register_measurement(name, nodes, get_tracedata_func,  *args, modes, **kwargs)
+        self.multiplexer.register_measurement(name, nodes, get_tracedata_func,  *args, modes=modes, **kwargs)
         for node in nodes.keys():
             self.watchdog.register_node(f"{name}.{node}", -10, 10)
 
