@@ -18,8 +18,8 @@ from warnings import warn
 import numpy as np
 import qkit
 import qkit.measure.measurement_base as mb
-from qkit.measure.spin_suite.utils.multiplexer import Sequential_multiplexer
-from qkit.measure.spin_suite.utils.watchdog import Watchdog
+from qkit.measure.spin_suite.utils.multiplexer_modes import Sequential_multiplexer
+from qkit.measure.spin_suite.utils.watchdog_modes import Watchdog
 from qkit.gui.notebook.Progress_Bar import Progress_Bar
 from qkit.measure.write_additional_files import get_instrument_settings
 
