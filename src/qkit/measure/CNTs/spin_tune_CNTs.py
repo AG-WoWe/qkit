@@ -76,12 +76,18 @@ class Tuning_CNTs(Tuning):
 
     
     def _append_value(self, latest_data, container, modes=None):
-        for name, values in latest_data.items():
+        for name, values in latest_data.items():   
             self.watchdog.limits_check(name, values)
-            container[f"{name}.{modes}"].append(float(values))
+            if modes is None:
+                key = name
+            else:
+                key = f"{name}.{modes}"
+            container[key].append(float(values))
+
 
     
-    def measure1D(self, modes=None, data_to_show = None):
+
+    def measure1D(self, data_to_show = None):
         """
         Starts a 1D - measurement, along the x coordinate with the respecting mode
         
@@ -92,12 +98,14 @@ class Tuning_CNTs(Tuning):
         """
         assert self._x_parameter, f"{__name__}: Cannot start measure1D. x_parameters required."
         self._measurement_object.measurement_func = "%s: measure1D" % __name__
-        if len(modes) <= 1 or modes is None:
+
+        mode_list = self.multiplexer.modes_right_order
+        if mode_list is None or len(mode_list) <= 1 :
             pb = Progress_Bar(len(self._x_parameter.values) * self.multiplexer.no_active_nodes)
         else:
             pb = Progress_Bar(2*len(self._x_parameter.values) * self.multiplexer.no_active_nodes)
         
-        dsets = self.multiplexer.prepare_measurement_datasets([self._x_parameter], modes)
+        dsets = self.multiplexer.prepare_measurement_datasets([self._x_parameter], mode_list)
         self._prepare_measurement_file(dsets)
         self._open_qviewkit(datasets = data_to_show)
 
@@ -106,13 +114,13 @@ class Tuning_CNTs(Tuning):
             sweepy = []
             difference = False
             
-            if modes is None:
+            if mode_list is None:
                 sweepy.append(self._prepare_empty_container())
-            elif isinstance(modes, list):
-                if "difference" in modes:
+            elif isinstance(mode_list, list):
+                if "difference" in mode_list:
                     difference = True
-                    modes.remove("difference")
-                for i, val in enumerate(modes):
+                    mode_list.remove("difference")
+                for i, val in enumerate(mode_list):
                     sweepy.append(self._prepare_empty_container(val))
             
             # if modes in (None, "trace"):
@@ -120,7 +128,7 @@ class Tuning_CNTs(Tuning):
             # elif modes in ("retrace", "difference"):
             #     sweep_trace = self._prepare_empty_container("trace")
             
-            if modes is None:
+            if mode_list is None:
                 for x in x_vals:
                     self._x_parameter.set_function(x)
                     qkit.flow.sleep(self._x_parameter.wait_time)
@@ -131,10 +139,10 @@ class Tuning_CNTs(Tuning):
                     if self.watchdog.stop:
                         warn(f"{__name__}: {self.watchdog.message}")
                         break
-                    self._append_vector(sweepy[0], self._datasets, direction=1)
+                self._append_vector(sweepy[0], self._datasets, direction=1)
 
-            elif isinstance(modes, list):
-                for i, val in enumerate(modes):
+            elif isinstance(mode_list, list):
+                for i, val in enumerate(mode_list):
                     match val:
                         case "trace":
                             direction = 1
@@ -156,25 +164,39 @@ class Tuning_CNTs(Tuning):
                 for name, measurement in self.multiplexer.registered_measurements.items():
                     if measurement["active"]:
                         for node in measurement["nodes"]:
-                            if len(modes) > 1:
+                            if len(mode_list) > 1:
                         # if modes in ("retrace", "difference") and not self.watchdog.stop:
                                 a = self._data_file.add_view(
                                     f"Trace_retrace_{node}",
-                                    x=self._datasets[f"{name}.{node}.trace"],
+                                    x=self._coordinates[self._x_parameter.name],
+                                    y=self._datasets[f"{name}.{node}.trace"],
                                 )
                                 a.add(
-                                    x=self._datasets[f"{name}.{node}.retrace"]
+                                    x=self._coordinates[self._x_parameter.name],
+                                    y=self._datasets[f"{name}.{node}.retrace"]
                                 )
-                            if difference and not self.watchdog.stop:
-                    
-                                t = self._datasets[f"{name}.{node}.trace"]
-                                r = self._datasets[f"{name}.{node}.retrace"]
-                                d = self._datasets[f"{name}.{node}.difference"]
-    
-                                d.append(t - r)
-                
+                            
+                        if difference:
+                            sweep_diff = self._prepare_empty_container("difference")
+                            trace_container = sweepy[0]
+                            retrace_container = sweepy[1]
+
+                            for trace_key, trace_vals in trace_container.items():
+                                base = trace_key.replace(".trace", "")
+                                retrace_key = f"{base}.retrace"
+                                diff_key = f"{base}.difference"
+
+                                retrace_vals = retrace_container[retrace_key]
+                                retrace_vals = retrace_vals[::-1]
+                                
+                                diff_vals = [t - r for t, r in zip(trace_vals, retrace_vals)]
+
+                                sweep_diff[diff_key] = diff_vals
+                            
+                            self._append_vector(sweep_diff, self._datasets, direction = 1)
+                       
             else:
-                assert TypeError(type(modes))
+                assert TypeError(type(mode_list))
 
     
 
@@ -214,7 +236,7 @@ class Tuning_CNTs(Tuning):
        
             
        
-    def measure2D(self, modes = None, data_to_show = None):
+    def measure2D(self, data_to_show = None):
         """
         Starts a 2D - measurement, with y being the inner and x the outer loop coordinate.
         
@@ -225,24 +247,27 @@ class Tuning_CNTs(Tuning):
         """
         assert self._x_parameter, f"{__name__}: Cannot start measure2D. x_parameters required."
         assert self._y_parameter, f"{__name__}: Cannot start measure2D. y_parameters required."
-        self._measurement_object.measurement_func = "%s: measure2D" % __name__        
-        
-        if len(modes) <= 1 or modes is None:
-            pb = Progress_Bar(len(self._x_parameter.values) * self.multiplexer.no_active_nodes)
+        self._measurement_object.measurement_func = "%s: measure2D" % __name__   
+
+
+        mode_list = self.multiplexer.modes_right_order
+        if mode_list is None or len(mode_list) <= 1 :
+            pb = Progress_Bar(len(self._x_parameter.values) * len(self._y_parameter.values)* self.multiplexer.no_active_nodes)
         else:
-            pb = Progress_Bar(2*len(self._x_parameter.values) * self.multiplexer.no_active_nodes)
+            pb = Progress_Bar(2*len(self._x_parameter.values) * len(self._y_parameter.values)* self.multiplexer.no_active_nodes)
         
-        dsets = self.multiplexer.prepare_measurement_datasets([self._x_parameter, self._y_parameter], modes)        
+        dsets = self.multiplexer.prepare_measurement_datasets([self._x_parameter, self._y_parameter], mode_list)        
         self._prepare_measurement_file(dsets)
         self._open_qviewkit(datasets = data_to_show)
         
         try:
+            
             x_vals = self._x_parameter.values
             y_vals = self._y_parameter.values            
             difference = False
-            if "difference" in modes:
+            if mode_list is not None and "difference" in mode_list:
                     difference = True
-                    modes.remove("difference")
+                    mode_list.remove("difference")
             
             for x in x_vals:                           
                 
@@ -251,27 +276,30 @@ class Tuning_CNTs(Tuning):
                 self._acquire_log_functions()
                 qkit.flow.sleep(self._x_parameter.wait_time)
                 
-                if modes is None:
+                if mode_list is None:
                     sweepy.append(self._prepare_empty_container())
-                elif isinstance(modes, list):           
-                    for i, val in enumerate(modes):
+                elif isinstance(mode_list, list):           
+                    for i, val in enumerate(mode_list):
                         sweepy.append(self._prepare_empty_container(val))
                 
-                if modes is None:
+                if mode_list is None:
                     for y in y_vals:
                         self._y_parameter.set_function(y)
                         qkit.flow.sleep(self._y_parameter.wait_time)
                         latest = self.multiplexer.measure()
                         self._append_value(latest, sweepy[0])
-                        pb.iterate(addend=len(latest))
-        
                         if self.watchdog.stop:
                             warn(f"{__name__}: {self.watchdog.message}")
                             break
-                        self._append_vector(sweepy[0], self._datasets, direction=1)
+                        pb.iterate(addend=len(latest))
+                    
+                    self._append_vector(sweepy[0], self._datasets, direction=1)
+                        
+        
+                        
                 
-                elif isinstance(modes, list):
-                    for i, val in enumerate(modes):
+                elif isinstance(mode_list, list):
+                    for i, val in enumerate(mode_list):
                         match val:
                             case "trace":
                                 direction = 1
@@ -282,17 +310,18 @@ class Tuning_CNTs(Tuning):
                             qkit.flow.sleep(self._y_parameter.wait_time)
                             latest = self.multiplexer.measure()
                             self._append_value(latest, sweepy[i], modes = val)
-                            pb.iterate(addend=len(latest))
-            
                             if self.watchdog.stop:
                                 warn(f"{__name__}: {self.watchdog.message}")
-                                break      
+                                break   
+                            pb.iterate(addend=len(latest))
+            
+                               
                         self._append_vector(sweepy[i], self._datasets, direction=direction)
                     
                     for name, measurement in self.multiplexer.registered_measurements.items():
                         if measurement["active"]:
                             for node in measurement["nodes"]:
-                                if len(modes) > 1:
+                                if len(mode_list) > 1:
                                     a = self._data_file.add_view(
                                         f"Trace_retrace_{node}",
                                         x=self._coordinates[self._x_parameter.name],
@@ -302,13 +331,36 @@ class Tuning_CNTs(Tuning):
                                         x=self._coordinates[self._x_parameter.name],
                                         y=self._datasets[f"{name}.{node}.retrace"]
                                     )
-                                if difference and not self.watchdog.stop:
+
+
+                            if difference:
+                                sweep_diff = self._prepare_empty_container("difference")
+                                trace_container = sweepy[0]
+                                retrace_container = sweepy[1]
+
+                                for trace_key, trace_vals in trace_container.items():
+                                    base = trace_key.replace(".trace", "")
+                                    retrace_key = f"{base}.retrace"
+                                    diff_key = f"{base}.difference"
+
+                                    retrace_vals = retrace_container[retrace_key]
+                                    retrace_vals = retrace_vals[::-1]
+                                    
+                                    diff_vals = [t - r for t, r in zip(trace_vals, retrace_vals)]
+
+                                    sweep_diff[diff_key] = diff_vals
+
+
+                                self._append_vector(sweep_diff, self._datasets, direction=1)
+
+                                #if difference and not self.watchdog.stop:
                         
-                                    t = self._datasets[f"{name}.{node}.trace"]
-                                    r = self._datasets[f"{name}.{node}.retrace"]
-                                    d = self._datasets[f"{name}.{node}.difference"]
-        
-                                    d.append(t - r)
+                                #    t = self._datasets[f"{name}.{node}.trace"]
+                                #    r = self._datasets[f"{name}.{node}.retrace"]
+                                #    d = self._datasets[f"{name}.{node}.difference"]
+
+                                #   for i in range(len(t)):
+                                #         d.append(t[i] - r[i])
                 
                 # for y in y_vals:                    
                 #     self._y_parameter.set_function(y)
@@ -370,7 +422,7 @@ class Tuning_CNTs(Tuning):
             self.watchdog.reset()
             self._end_measurement()    
 
-    def measure3D(self, modes=None, data_to_show = None):
+    def measure3D(self, data_to_show = None):
         """
         Starts a 3D - measurement, with z being the innermost, y the inner and x the outer loop coordinate.
 
@@ -384,12 +436,13 @@ class Tuning_CNTs(Tuning):
         assert self._z_parameter, f"{__name__}: Cannot start measure3D. z_parameters required."
         self._measurement_object.measurement_func = "%s: measure3D" % __name__        
         
-        if len(modes) <= 1 or modes is None:
-            pb = Progress_Bar(len(self._x_parameter.values) * self.multiplexer.no_active_nodes)
+        mode_list = self.multiplexer.modes_right_order
+        if mode_list is None or len(mode_list) <= 1 :
+            pb = Progress_Bar(len(self._x_parameter.values)*len(self._y_parameter.values)*len(self._z_parameter.values) * self.multiplexer.no_active_nodes)
         else:
-            pb = Progress_Bar(2*len(self._x_parameter.values) * self.multiplexer.no_active_nodes)
+            pb = Progress_Bar(2*len(self._x_parameter.values) *len(self._y_parameter.values)*len(self._z_parameter.values) * self.multiplexer.no_active_nodes)
         
-        dsets = self.multiplexer.prepare_measurement_datasets([self._x_parameter, self._y_parameter, self._z_parameter], modes)
+        dsets = self.multiplexer.prepare_measurement_datasets([self._x_parameter, self._y_parameter, self._z_parameter], mode_list)
         self._prepare_measurement_file(dsets)
         self._open_qviewkit(datasets = data_to_show)
 
@@ -398,9 +451,9 @@ class Tuning_CNTs(Tuning):
             y_vals = self._y_parameter.values
             z_vals = self._z_parameter.values
             difference = False        
-            if "difference" in modes:
+            if mode_list is not None and "difference" in mode_list:
                     difference = True
-                    modes.remove("difference")
+                    mode_list.remove("difference")
                     
             for x in x_vals:
                 self._x_parameter.set_function(x)
@@ -411,13 +464,13 @@ class Tuning_CNTs(Tuning):
                     sweepy = []
                     self._y_parameter.set_function(y)
                     qkit.flow.sleep(self._y_parameter.wait_time)
-                    if modes is None:
+                    if mode_list is None:
                         sweepy.append(self._prepare_empty_container())
-                    elif isinstance(modes, list):           
-                        for i, val in enumerate(modes):
+                    elif isinstance(mode_list, list):           
+                        for i, val in enumerate(mode_list):
                             sweepy.append(self._prepare_empty_container(val))                 
                     
-                    if modes is None:
+                    if mode_list is None:
                         for z in z_vals:
                             self._z_parameter.set_function(z)
                             qkit.flow.sleep(self._z_parameter.wait_time)
@@ -428,10 +481,10 @@ class Tuning_CNTs(Tuning):
                             if self.watchdog.stop:
                                 warn(f"{__name__}: {self.watchdog.message}")
                                 break
-                            self._append_vector(sweepy[0], self._datasets, direction=1)
+                        self._append_vector(sweepy[0], self._datasets, direction=1)
                     
-                    elif isinstance(modes, list):
-                        for i, val in enumerate(modes):
+                    elif isinstance(mode_list, list):
+                        for i, val in enumerate(mode_list):
                             match val:
                                 case "trace":
                                     direction = 1
@@ -449,28 +502,50 @@ class Tuning_CNTs(Tuning):
                                     break      
                         self._append_vector(sweepy[i], self._datasets, direction=direction)
                         
+                       # if difference:
+                        #     sweep_diff = self._prepare_empty_container("difference")
+                         #    t_vals = sweepy[0]
+                          #   r_vals = sweepy[1][::-1]
+                           #  name, value = sweepy[0].keys()
+                            # 
+                             #sweep_diff[name.replace("trace", "difference")] = t_vals['name'] - r_vals[name.replace("trace", "retrace")]
+                             
+                    
+                             #self._append_vector(sweep_diff, self._datasets, direction=1)
+                        
                         for name, measurement in self.multiplexer.registered_measurements.items():
                             if measurement["active"]:
-                                for node in measurement["nodes"]:
-                                    if len(modes) > 1:
-                                        a = self._data_file.add_view(
-                                        f"Trace_retrace_{node}",
-                                        x=self._coordinates[self._x_parameter.name],
-                                        y=self._coordinates[self._y_parameter.name],
-                                        z=self._datasets[f"{self.name_meas}.{node}.trace"],
-                                        )
-                                        a.add(
-                                            x=self._coordinates[self._x_parameter.name],
-                                            y=self._coordinates[self._y_parameter.name],
-                                            z=self._datasets[f"{self.name_meas}.{node}.retrace"]
-                                        )
+                     #           for node in measurement["nodes"]:
+                     #               if len(mode_list) > 1:
+                     #                   a = self._data_file.add_view(
+                     #                       f"Trace_retrace_{node}",
+                     #                       x=self._coordinates[self._z_parameter.name],
+                     #                       y=self._datasets[f"{name}.{node}.trace"],
+                     #                   )
+                     #                   a.add(
+                     #                       x=self._coordinates[self._z_parameter.name],
+                     #                       y=self._datasets[f"{name}.{node}.retrace"]
+                     #                   )
                                     
-                                    if difference and not self.watchdog.stop:                     
-                                        t = self._datasets[f"{name}.{node}.trace"]
-                                        r = self._datasets[f"{name}.{node}.retrace"]
-                                        d = self._datasets[f"{name}.{node}.difference"]
-            
-                                        d.append(t - r)
+                                if difference:
+                                    sweep_diff = self._prepare_empty_container("difference")
+                                    trace_container = sweepy[0]
+                                    retrace_container = sweepy[1]
+
+                                    for trace_key, trace_vals in trace_container.items():
+                                        base = trace_key.replace(".trace", "")
+                                        retrace_key = f"{base}.retrace"
+                                        diff_key = f"{base}.difference"
+
+                                        retrace_vals = retrace_container[retrace_key]
+                                        retrace_vals = retrace_vals[::-1]
+                                        
+                                        diff_vals = [t - r for t, r in zip(trace_vals, retrace_vals)]
+
+                                        sweep_diff[diff_key] = diff_vals
+
+
+                                    self._append_vector(sweep_diff, self._datasets, direction=1)
                     
                     # if modes == "difference" and not self.watchdog.stop:
                     #     sweep_diff = self._prepare_empty_container("difference")

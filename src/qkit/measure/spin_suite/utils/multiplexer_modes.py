@@ -76,6 +76,7 @@ class Sequential_multiplexer:
         ALLOWED_ORDER = ["trace", "retrace", "difference"]
         ALLOWED_SET = set(ALLOWED_ORDER)
         if modes is None:
+            self.modes_right_order = None
             pass
         else:
             if not isinstance(modes, (list, tuple)):
@@ -111,7 +112,7 @@ class Sequential_multiplexer:
                     f"Valid options are prefixes of {ALLOWED_ORDER}"
                 )
         
-            modes = reordered
+            self.modes_right_order = reordered
 
         self.registered_measurements[name] = {"nodes" : nodes, "get_tracedata_func" : lambda: get_tracedata_func(*args, **kwargs), "active" : False}
         self.no_measurements = len(self.registered_measurements)
