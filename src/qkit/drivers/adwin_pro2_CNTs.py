@@ -125,7 +125,7 @@ class adwin_pro2_CNTs(Instrument):
     """
     
     def __init__(self,
-                 name='ADwin_Pro2_V3_CNTs',
+                 name='adwin_pro2_CNTs',
                  processnumber_main=1,
                  processpath_main="/home/nanospin/qkit/src/qkit/drivers/adwinlib/CNTs/ramp_input_V3_Pro2.TC1",
                  process_number_triggered=2,
@@ -622,16 +622,15 @@ class adwin_pro2_CNTs(Instrument):
                 pass      
 
             result = np.zeros(4)  
-            digitvalue_real_1 = self.adw.GetData_Float(198, input_port, 1)
-            digitvalue_real   = np.array(digitvalue_real_1, dtype=np.float32)
-            voltvalue_real    = self.digit_to_volt(digitvalue_real, bit_format=16)
+            digitvalue_real=self.adw.GetData_Float(170, input_port, 1)[0]
+            print(digitvalue_real)
+            voltvalue_real=self.digit_to_volt(digitvalue_real, bit_format=16)
+            result[0] = voltvalue_real/gain # this normalisation has to be done after digit to volt conversion, otherwise it might result in digit_value < 0 which produce volt_value = 0
 
-            digitvalue_imag_1 = self.adw.GetData_Float(197, input_port, 1)
-            digitvalue_imag   = np.array(digitvalue_imag_1, dtype=np.float32)
-            voltvalue_imag    = self.digit_to_volt(digitvalue_imag, bit_format=16)
+            digitvalue_imag=self.adw.GetData_Float(171, input_port, 1)[0]
+            voltvalue_imag=self.digit_to_volt(digitvalue_imag, bit_format=16)
+            result[1] = voltvalue_imag/gain # this normalisation has to be done after digit to volt conversion, otherwise it might result in digit_value < 0 which produce volt_value = 0
 
-            result[0] = voltvalue_real/gain
-            result[1] = voltvalue_imag/gain
             result[2] = np.sqrt(result[1]**2 + result[0]**2) # contains amplitude of lock-in signal
             result[3] = -np.arctan(result[1]/result[0]) # contains phase of lock-in signal
 
@@ -639,6 +638,7 @@ class adwin_pro2_CNTs(Instrument):
             logging.info(__name__ +': reading lock-in imag part on input %d : %f S , %d digits'%(input_port, result[1], digitvalue_imag))
             
             return result
+
 
 
     def get_DCcurrent_LIreal_LIimag(self, input_port, module_number, output_port, frequency, amplitude, time_average, gain, divider):
@@ -703,21 +703,16 @@ class adwin_pro2_CNTs(Instrument):
                 # time.sleep(0.4)
                 pass     
             result = np.zeros(5) 
-            
-            digitvalue_dc_1 = self.adw.GetData_Float(190, input_port, 1)[0]
-            digitvalue_dc   = np.array(digitvalue_dc_1, dtype=np.float32)
-            voltvalue_dc    = self.digit_to_volt(digitvalue_dc, bit_format=16)
-            
-            digitvalue_real_1 = self.adw.GetData_Float(198, input_port, 1)[0]
-            digitvalue_real   = np.array(digitvalue_real_1, dtype=np.float32)
-            voltvalue_real    = self.digit_to_volt(digitvalue_real, bit_format=16)
-
-            digitvalue_imag_1 = self.adw.GetData_Float(197, input_port, 1)[0]
-            digitvalue_imag   = np.array(digitvalue_imag_1, dtype=np.float32)
-            voltvalue_imag    = self.digit_to_volt(digitvalue_imag, bit_format=16)
-
+            digitvalue_dc=self.adw.GetData_Float(190, input_port, 1)[0]
+            voltvalue_dc=self.digit_to_volt(digitvalue_dc, bit_format=16)
             result[0] = voltvalue_dc/gain # this normalisation has to be done after digit to volt conversion, otherwise it might result in digit_value < 0 which produce volt_value = 0
+
+            digitvalue_real=self.adw.GetData_Float(170, input_port, 1)[0]
+            voltvalue_real=self.digit_to_volt(digitvalue_real, bit_format=16)
             result[1] = voltvalue_real/gain # this normalisation has to be done after digit to volt conversion, otherwise it might result in digit_value < 0 which produce volt_value = 0
+
+            digitvalue_imag=self.adw.GetData_Float(171, input_port, 1)[0]
+            voltvalue_imag=self.digit_to_volt(digitvalue_imag, bit_format=16)
             result[2] = voltvalue_imag/gain # this normalisation has to be done after digit to volt conversion, otherwise it might result in digit_value < 0 which produce volt_value = 0
 
             result[3] = np.sqrt(result[1]**2 + result[0]**2) # contains amplitude of lock-in signal
@@ -726,7 +721,6 @@ class adwin_pro2_CNTs(Instrument):
             logging.info(__name__ +': reading DC current on input %d : %f A , %d digits'%(input_port, result[0], digitvalue_dc))
             logging.info(__name__ +': reading lock-in real part on input %d : %f S , %d digits'%(input_port, result[1], digitvalue_real))
             logging.info(__name__ +': reading lock-in imag part on input %d : %f S , %d digits'%(input_port, result[2], digitvalue_imag))
-
             return result
 
     
