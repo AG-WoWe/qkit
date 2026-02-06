@@ -324,11 +324,11 @@ class Tuning_CNTs(Tuning):
                                 if len(mode_list) > 1:
                                     a = self._data_file.add_view(
                                         f"Trace_retrace_{node}",
-                                        x=self._coordinates[self._x_parameter.name],
+                                        x=self._coordinates[self._y_parameter.name],
                                         y=self._datasets[f"{name}.{node}.trace"],
                                     )
                                     a.add(
-                                        x=self._coordinates[self._x_parameter.name],
+                                        x=self._coordinates[self._y_parameter.name],
                                         y=self._datasets[f"{name}.{node}.retrace"]
                                     )
 
