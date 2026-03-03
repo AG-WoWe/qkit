@@ -127,7 +127,7 @@ class adwin_pro2_CNTs(Instrument):
     def __init__(self,
                  name='adwin_pro2_CNTs',
                  processnumber_main=1,
-                 processpath_main="/home/nanospin/qkit/src/qkit/drivers/adwinlib/CNTs/ramp_input_V3_Pro2.TC1",
+                 processpath_main="/home/nanospin/qkit/src/qkit/drivers/adwinlib/CNTs/ramp_input_V4_Pro2.TC1",
                  process_number_triggered=2,
                  process_path_triggered='/home/nanospin/qkit/src/qkit/drivers/adwinlib/CNTs/ADCF_Burst_Event_V3_Pro2_group_avg.TC2',
                  process_number_aquisition=3,
