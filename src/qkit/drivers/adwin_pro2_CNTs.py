@@ -127,7 +127,7 @@ class adwin_pro2_CNTs(Instrument):
     def __init__(self,
                  name='adwin_pro2_CNTs',
                  processnumber_main=1,
-                 processpath_main="/home/nanospin/qkit/src/qkit/drivers/adwinlib/CNTs/ramp_input_V4_Pro2.TC1",
+                 processpath_main= "/home/nanospin/qkit/src/qkit/drivers/adwinlib/CNTs/ramp_input_V5_Pro2.TC1",
                  process_number_triggered=2,
                  process_path_triggered='/home/nanospin/qkit/src/qkit/drivers/adwinlib/CNTs/ADCF_Burst_Event_V3_Pro2_group_avg.TC2',
                  process_number_aquisition=3,
@@ -673,7 +673,6 @@ class adwin_pro2_CNTs(Instrument):
         self.set_FPar_20_global_float(frequency)
 
         amplitude_digit, _ =self.volt_to_digit(amplitude*divider) # multiplication by divider has to be done before volt to digit conversion
-
         self.set_Par_20_global_long(amplitude_digit)
 
         self.set_FPar_23_global_float(time_average)
@@ -717,7 +716,6 @@ class adwin_pro2_CNTs(Instrument):
 
             result[3] = np.sqrt(result[1]**2 + result[0]**2) # contains amplitude of lock-in signal
             result[4] = -np.arctan(result[1]/result[0]) # contains phase of lock-in signal
-
             logging.info(__name__ +': reading DC current on input %d : %f A , %d digits'%(input_port, result[0], digitvalue_dc))
             logging.info(__name__ +': reading lock-in real part on input %d : %f S , %d digits'%(input_port, result[1], digitvalue_real))
             logging.info(__name__ +': reading lock-in imag part on input %d : %f S , %d digits'%(input_port, result[2], digitvalue_imag))
