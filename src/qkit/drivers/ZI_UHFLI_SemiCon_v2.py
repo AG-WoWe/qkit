@@ -35,10 +35,16 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         self._device_id = device_id
         super().__init__(name, self._device_id)
         
+        daq1 = self._session.modules.create_daq_module().raw_module
+        daq2 = self._session.modules.create_daq_module().raw_module
+
+        self.daqM1 = qkit.instruments.create("UHFLI_daqM1", "ZI_DAQ_module", unmanaged_daq_module=daq1, device_id=self._device_id)
+        self.daqM2 = qkit.instruments.create("UHFLI_daqM2", "ZI_DAQ_module", unmanaged_daq_module=daq2, device_id=self._device_id)
+        
         self._FLAG_THROW = 0x0004
         self._FLAG_DETECT = 0x0008
-        self.integration_time = 0.2 #in s
-        self.timeout = 100 #in ms
+        self.integration_time = 0.05 #in s
+        self.timeout = 0.1 #in s // timeout > integration_time
         
         self.add_parameter("data_nodes", type = list,
                           flags = self.FLAG_SET | self.FLAG_SOFTGET)
@@ -60,18 +66,20 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         self.add_function("get_sample")
         self.add_function("continuous_acquisition")
         self.add_function("sample_averaged")
+        self.add_function("convert_reader")
+        
         
     def create_daq_module(self):
         """Create a *new* LabOne Data Acquisition Module instance (unmanaged)."""
         # Toolkit provides a factory for DAQ modules.
         return self.session.create_daq_module()
-    
+     
     
     # ================= CONVENIENCE =================
     def activate_ch0(self):
         self.set_dem0_demod_enable(True)
         self.set_ch0_output(True)
-        demods = list(self.get_subscribed_demods())  # bei uns statt get_daq_sample_path()
+        demods = list(self.get_subscribed_demods())  
         if 0 not in demods:
             demods.append(0)
         self.easy_sub(demods)
@@ -101,18 +109,29 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         self.easy_sub(demods)
         
    
-    def sample_dem(self, channel: int) -> Dict[str, float]:
+    def sample_dem(self, channel: int, wait_settle_time: bool = True) -> Dict[str, float]:
         assert self.get(f"dem{channel}_demod_enable"), f"{__name__}: Demod {channel} is not enabled."
+        
+        if wait_settle_time:
+            self.wait_settle_time(channel)
 
         raw = self._device.demods[channel].sample()   
         nodes = self.get_data_nodes()
+        
 
         out: Dict[str, float] = {}
         for node in nodes:
-            out[f"{node}{channel}"] = float(raw[node])  
+            v = raw[node]
+            # wenn v ein Array/Listen ist: letzten Wert nehmen
+            if hasattr(v, "__len__") and not np.isscalar(v):
+                v = v[-1]
+            out[f"{node}{channel}"] = float(v)
+            #print(float(raw[node]))
+            #out[f"{node}{channel}"] = float(raw[node])  
 
         if "x" in nodes and "y" in nodes:
             out[f"r{channel}"] = float(np.hypot(out[f"x{channel}"], out[f"y{channel}"]))
+            out[f"theta{channel}"] = np.arctan2(out[f"y{channel}"], out[f"x{channel}"])
         return out
 
    
@@ -153,9 +172,10 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
                 got[node] = float(getattr(raw, node))  
             channels[d] = got  
             
-        return channels
-        
-    def continuous_acquisition0(self):
+        return channels 
+    
+    
+    def continuous_acquisition(self):
         """
         Polls samples for 50 ms.
         Intended to be used in a a loop which calls the function repeatedly.
@@ -174,65 +194,18 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         EOFerror
             If sample loss is detected.
         """
-        measured = self.daq.poll(self.integration_time, self.timeout, self._FLAG_THROW | self._FLAG_DETECT, True)
-        nodes = self.get_data_nodes()
-        gotten_traces = {}
-        for path in measured.keys():
-            demod_index = path.split('demods/')[1][0]
-            for node in nodes:
-                gotten_traces[f"{node}{demod_index}"] = measured[path][node]
-            if "x" in nodes and "y" in nodes:
-                gotten_traces[f"r{demod_index}"] = np.sqrt(gotten_traces[f"x{demod_index}"]**2 + gotten_traces[f"y{demod_index}"]**2)
-        return gotten_traces    
-    
-    def continuous_acquisition1(self):
-        """
-        Polls samples for integration_time.
-        Intended to be used in a loop which calls the function repeatedly.
-        """
-
         nodes = self.get_data_nodes()
         gotten_traces = {}
 
-        # Toolkit poll (Flags optional je nach Version)
-        #try:
-         #   from zhinst.toolkit.session import PollFlags
-          #  measured = self._session.poll(self.integration_time, flags=PollFlags.DETECT_AND_THROW)
-        #except Exception:
-        measured = self._session.poll(self.integration_time)
-
-        # statt über measured.keys() zu gehen, benutzen wir die bekannten Demods
-        for d in self.get_subscribed_demods():
-            path = self._device.demods[d].sample.path
-            if path not in measured:
-                continue
-
-            block = measured[path]
-            if isinstance(block, list) and len(block) > 0:
-                block = block[0]
-
-            for node in nodes:
-                if node in block:
-                    gotten_traces[f"{node}{d}"] = block[node]
-
-            if "x" in nodes and "y" in nodes and f"x{d}" in gotten_traces and f"y{d}" in gotten_traces:
-                gotten_traces[f"r{d}"] = np.sqrt(
-                    gotten_traces[f"x{d}"]**2 + gotten_traces[f"y{d}"]**2
-            )
-
-        return gotten_traces
-    
-    def continuous_acquisition(self):
-        nodes = self.get_data_nodes()
-        gotten_traces = {}
-
-        # Polling Data: session.poll(recording_time, timeout)  (timeout als keyword!)
-        # Siehe LabOne Manual
+        # Polling Data: session.poll(recording_time, timeout)
+        #self._session.poll(0)
         measured = self._session.poll(self.integration_time, timeout=self.timeout)
+        #print(measured)
 
         for d in self.get_subscribed_demods():
             sample_node = self._device.demods[d].sample
-
+            #print(sample_node)
+            
             if sample_node not in measured:
                 continue
 
@@ -252,11 +225,11 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
 
             if "x" in nodes and "y" in nodes and f"x{d}" in gotten_traces and f"y{d}" in gotten_traces:
                 gotten_traces[f"r{d}"] = np.hypot(gotten_traces[f"x{d}"], gotten_traces[f"y{d}"])
+            print("TIS ARE THE WONDERFULL TRACES LOOK AND SEE:", gotten_traces)
 
         return gotten_traces
 
 
-                
     def sample_averaged(self, avgs):
         """
         Software averages samples before returning.
@@ -302,8 +275,36 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
                     node_lengths[node] = count
                 cumulated_avgs[node] += np.sum(values)
         result = {node: values/avgs for node, values in cumulated_avgs.items()}        
-        return result            
-    
+        return result    
+          
+    def convert_reader(self, reader, *, v_gain, voltage_divider=False, divider_factor=1.0):
+        """
+        Wrappt einen Reader und konvertiert nur x0/y0 (und setzt r0 neu).
+        timestamp0 bleibt unverändert.
+        """
+        def wrapped():
+            d = reader()
+            out = dict(d)
+
+            # nur wenn x0/y0 existieren und nicht leer sind
+            if "x0" in out and "y0" in out and len(out["x0"]) > 0:
+                x = out["x0"].astype(float, copy=False)
+                y = out["y0"].astype(float, copy=False)
+
+                if voltage_divider:
+                    x = x * divider_factor
+                    y = y * divider_factor
+
+                x = x / v_gain
+                y = y / v_gain
+
+                out["x0"] = x
+                out["y0"] = y
+                out["r0"] = np.hypot(x, y)
+
+            return out
+        return wrapped
+        
     def _do_set_subscribed_demods(self, newdemods):
         typerr = TypeError(f"{__name__}: Cannot set {newdemods} as subscribed_demods. Must be a list of int.")
         for element in newdemods:
@@ -332,7 +333,60 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
             if element not in allowed_nodes:
                 raise ValueError(f"{__name__}: {element} is not an allowed data_node. The allowed data_nodes are {allowed_nodes}.")
         logging.debug(__name__ + ' : setting data_nodes to %s' % (newnode))
-        
+    
+    def labone_fft_demod(self, demod=0, cols=65536, timeout=10):
+        """
+        LabOne native FFT using DAQ module (identical to Web UI FFT tab).
+        """
+
+        daq = self._session.modules.daq
+
+        daq.grid.mode(4)                # FFT mode
+        daq.type(0)
+        daq.preview(1)
+        daq.grid.rows(10)
+        daq.grid.rowrepetition(1)
+        daq.grid.waterfall(1)
+        daq.grid.overwrite(1)
+
+        daq.device(self._device_id)
+        daq.historylength(10)
+        daq.delay(0)
+
+        daq.spectrum.enable(1)
+        daq.grid.cols(int(cols))
+        daq.clearhistory(1)
+        daq.endless(0)
+
+        # FFT output nodes (UI identical)
+        fft_filter = f"/{self._device_id}/demods/{demod}/sample.xiy.fft.abs.filter"
+        fft_avg    = f"/{self._device_id}/demods/{demod}/sample.xiy.fft.abs.avg"
+
+        daq.subscribe(fft_filter)
+        daq.subscribe(fft_avg)
+
+        daq.execute()
+
+        import time
+        t0 = time.time()
+        result = {}
+
+        while time.time() - t0 < timeout:
+            data = daq.read()
+            if data:
+                result = data
+            if daq.progress()[0] >= 1.0 or daq.finished():
+                break
+            time.sleep(0.1)
+
+        daq.finish()
+        daq.unsubscribe("*")
+
+        if not result:
+            raise TimeoutError("No FFT data returned from LabOne.")
+
+        return result
+
         
         
 #%%
