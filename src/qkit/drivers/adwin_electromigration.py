@@ -58,6 +58,9 @@ from qkit.drivers.adwinlib.nanoqt_tools import read_nanoqt_outputs
 # the set values due to the time quantization of the hardware.
 # Therefore the real values can be read out after starting the process.
 
+#NANOQT SETTINGS
+NANOQT_OUT_CARD = 3
+
 # HARD CODED IN SWEEP AND READOUT PROCESS
 OUTPUT_CARD = 3        # Hard coded: DAC card for electromigration output
 OUTPUT_CHANNEL = 8     # Hard coded: DAC channel for source-drain voltage sweep output
@@ -66,7 +69,6 @@ GATE_CHANNEL = 7       # Hard coded: DAC channel for gate voltage sweep output
 # HARD CODED IN READOUT PROCESS
 VERSION_PROCESS_1 = 1  # Read: (Par)  Version of electromigration process
 READOUT_ACTIVE = 3     # Reports: '1' if readout process is active
-VOLTAGE = 38           # Read: (Par) Last applied source-drain voltage
 REPORT_VOLTAGE = 8     # Read: (Par) Voltage to start sending data to PC
 R_LIMIT = 1            # Set: (FPar) Resistance limit to stop sweep ('0' is no limit)
 SAMPLE_RATE = 9        # Set:  (FPar) Sample rate after subsampling (Hz)
@@ -108,6 +110,7 @@ class adwin_electromigration(Instrument):
         processor='T11',
         devicenumber=1,
         bootload=True,
+        force_bootload=False,
         hard_config=None,
         soft_config=None):
 
@@ -127,7 +130,7 @@ class adwin_electromigration(Instrument):
 
         # Set 'bootload' to 'False' to not reboot the Adwin.
         if bootload:
-            self._bootload(adw_system, processor)
+            self._bootload(adw_system, processor, force_bootload)
         else:
             firmware, version = self._read_adwin_firmware()
             if firmware != 'ELECTROMIGRATION':
@@ -207,7 +210,7 @@ class adwin_electromigration(Instrument):
             return False
         self.adw.Fifo_Clear(INS['current'])     # clear transmission fifo
         log.info('Adwin starting electromigration.')
-        
+
         # initialize processes
         self.adw.Start_Process(SWEEP_PROCESS_NO)
         sleep(delay)
@@ -346,14 +349,13 @@ class adwin_electromigration(Instrument):
             log.warning('ADwin: Fifo holds values for max %s seconds.',
             FIFO_LEN / self._sample_rate)
 
-    def _bootload(self, adw_system, processor):
+    def _bootload(self, adw_system, processor, force_bootload=False):
         # before boot try to read the current outputs, which can
         # fail if the adwin was power cycled and never booted since
         firmware, version = self._read_adwin_firmware()
         # Initialize output_buffer to 0V for all outputs as bits
         output_buffer = self.aio.output_zero_dict()
         # Depending on detected firmware read the current outputs
-        output_values = {name: 0 for name in self.aio.list_connected_outputs()}
         if firmware == 'SPIN-TRANSISTOR':
             output_buffer.update(self.read_outputs(out_format='bit'))
             output_values = self.read_outputs(out_format='qty')
@@ -369,7 +371,8 @@ class adwin_electromigration(Instrument):
             log.warning(msg)
             log.warning(self.read_outputs(out_format='bit'))
         elif firmware == 'NANOQT':
-            output_buffer = read_nanoqt_outputs(self.adw)
+            output_buffer = read_nanoqt_outputs(self.adw, self.aio,
+                                                output_card=NANOQT_OUT_CARD)
             msg = (f'Adwin: Current firmware: NanoQt: {version}. The '
                     + 'current outputs have been recovered to ensure a '
                     + 'nice ride with Electromigration firmware.')
@@ -380,6 +383,11 @@ class adwin_electromigration(Instrument):
                 + 'not boot initialize this driver. It is not able to '
                 + 'sweep outputs secure to zero! ')
             log.critical(msg)
+            if force_bootload:
+                output_values = {name: 0 for name in self.aio.list_connected_outputs()}
+            else:
+                raise AdwinFirmwareError("Use force_bootload=True to bootload with zero output"
+                                         + " buffer, but be careful if outputs are not zero!")
         else:
             log.critical('ADwin: YOU SHOULD NOT SEE THIS MEASSAGE!')
 
