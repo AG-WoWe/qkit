@@ -36,7 +36,7 @@ class ElectromigrationScript():
         self.def_valids()   # define valid inputs for params
         self.setup_params() # setup needed params for em
         # set duration for pc data receive, can't be changed after measurement started
-        self.set_update_duration(update_dur)    
+        self.set_update_duration(update_dur)
         self.set_em_params(**kwargs)     # set imported param values
         self.anna = adwin       # connect ADwin instrument
         self.update_script()    # generate measurement routine
@@ -44,7 +44,7 @@ class ElectromigrationScript():
     def def_valids(self):
         ''' define validations'''
         self.valid_inputs = ['current','resistance','conductance']
-        self.max_voltrate = 0.1 # rate in V per sec
+        self.max_voltrate = 0.5 # rate in V per sec
         self.max_volts = 10     # max voltage in V
         self.max_sample_rate = 500e3
         self.unit = {'current':'A','resistance':'ohm','conductance':'S'}
@@ -98,7 +98,7 @@ class ElectromigrationScript():
         self.tune = Tuning_EM()
         self.tune.qviewkit_singleInstance = True
 
-    def init_electormigration(self):
+    def init_electromigration(self):
         ''' set electromigration parameter for adwin'''
         self._state = 'init_em'
         self.anna.init_electromigration(sample_rate = self._em_params['sample_rate'],
@@ -212,11 +212,15 @@ class ElectromigrationScript():
 
     def set_em_params(self,**kwargs):
         ''' setter for multiple electromic params'''
+        log.info('Setting electromigration parameters...')
         for key, val in kwargs.items():
             if key in self._em_params.keys():
-                match val:
+                log.info(f'Setting {key} to {val}...')
+                match key:
                     case 'v_report' | 'v_stop' | 'v_rate':
-                        if isinstance(val, int):
+                        # log.info(f'{key} matches voltage parameter! {val} is type {type(val)}')
+                        if isinstance(val, int) or isinstance(val, float):
+                            # log.info(f'{val} is a valid type for {key}!')
                             if (val <= self.valids[key]) and (val >= 0):
                                 self._em_params[key] = val
                             else:

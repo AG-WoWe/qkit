@@ -276,6 +276,9 @@ class AdwinIO():
         if name is None:
             if card is not None and channel is not None:
                 name = self.get_name(card, channel)
+            else:
+                log.critical(f'Adwin: Output/Input not known {card,channel}.')
+
         return self._ports[name]['scale']
 
     def get_bits(self, name:str=None, card:int=None, channel:int=None):

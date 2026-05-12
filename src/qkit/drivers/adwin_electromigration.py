@@ -4,7 +4,7 @@
     will always be specially programmed to do certain tasks efficiently)
     Here we view the Adwin as a unit together with its peripherals, like
     current sources, voltage dividers, iv_converters, ..
-    We just want to tell it a voltage sweep_rate for the electromigration process
+    We just want to tell it a voltage sweep_duration for the electromigration process
     and a sample_rate for the data readout with PC. Optional parameter are:
         * report_voltage: voltage to start saving data for PC readout
         * max_voltage: maximal voltage to stop sweep, default -> 10V
@@ -54,7 +54,7 @@ from qkit.drivers.adwinlib.nanoqt_tools import read_nanoqt_outputs
 
 # These constants have to be synchronised with the definitions in the
 # ADbasic firmware! For parameters where time is involved (sample_rate,
-# sweep_rate) the exact values used by the firmware are sometimes not
+# sweep_duration) the exact values used by the firmware are sometimes not
 # the set values due to the time quantization of the hardware.
 # Therefore the real values can be read out after starting the process.
 
@@ -66,25 +66,27 @@ GATE_CHANNEL = 7       # Hard coded: DAC channel for gate voltage sweep output
 # HARD CODED IN READOUT PROCESS
 VERSION_PROCESS_1 = 1  # Read: (Par)  Version of electromigration process
 READOUT_ACTIVE = 3     # Reports: '1' if readout process is active
-GATE_VOLTAGE = 37      # Read: (Par) Last applied gate voltage
 VOLTAGE = 38           # Read: (Par) Last applied source-drain voltage
 REPORT_VOLTAGE = 8     # Read: (Par) Voltage to start sending data to PC
 R_LIMIT = 1            # Set: (FPar) Resistance limit to stop sweep ('0' is no limit)
-SAMPLE_RATE = 8        # Set:  (FPar) Sample rate after subsampling (Hz)
-REPORT_SAMPLE_RATE = 9 # Read: (FPar) Current samplerate (Hz)
+SAMPLE_RATE = 9        # Set:  (FPar) Sample rate after subsampling (Hz)
+REPORT_SAMPLE_RATE= 39 # Read: (FPar) Current samplerate (Hz)
 FIFO_LEN = 1000003     # Hard coded: Length of data transmittion FIFOS
 INS = {'current': 1}   # Data_1: (float) Raw input signal data FIFO
 INPUT_CARD = 2
-INPUT_CHANNEL = 7
-EMERGENCY_STOP = 12    # Command: (Par) Stop electromigration immediately (=1)
+INPUT_CHANNEL = 8
+EMERGENCY_STOP = 4     # Command: (Par) Stop electromigration immediately (=1)
 
 #HARD CODED IN SWEEP PROCESS
 VERSION_PROCESS_2 = 2  # Read: (Par)  Version of sweep process
-GATE_DURATION = 10     # Set: (Par) Duration for gate to sweep to zero
-SWEEP_ACTIVE = 11      # Command, Read: (Par) Start/Check Sweep (=1)
+VOLTAGE = 38           # Read: (Par) Last applied source-drain voltage
+GATE_DURATION = 17     # Set: (Par) Duration for gate to sweep to zero
+GATE_VOLTAGE = 37      # Read: (Par) Last applied gate voltage
+SWEEP_ACTIVE = 13      # Command, Read: (Par) Start/Check Sweep (=1)
 MAX_VOLTAGE = 18       # Maximal voltage for sweep
-GATE_SCALE = 20        # Scale for gate voltage (FPar)
+GATE_SCALE = 10        # Scale for gate voltage (FPar)
 SWEEP_RATE = 21        # Sweep rate of source-drain voltage (FPar)
+REPORT_RATE = 22       # Read: (FPar) Actual sweep rate for one voltage step
 
 # RESULTING FROM ADBASIC FILES
 OUT1_PAR= OUTPUT_CARD * 10 + 1 #The first output for card 3 is Par_31
@@ -141,7 +143,7 @@ class adwin_electromigration(Instrument):
         self.add_function('stop_electromigration')
         self.add_function('readout_fifos')
         self.add_function('read_outputs')
-        self.add_function('stop_sweep')
+        # self.add_function('stop_sweep')
         self.add_function('list_connected_outputs')
 
 ########################################################################
@@ -153,8 +155,8 @@ class adwin_electromigration(Instrument):
             during init_electromigration() and clear all other fifos '''
         res = {'current': None}
         print('Readout Fifos...')
-        for key in res:
-            if key in self._inputs:
+        for key in self._inputs:
+            if key in res:
                 print(key)
                 samples = self.adw.Fifo_Full(INS[key])
                 print(f'Found {samples} new samples in Fifo Data_{INS[key]}.')
@@ -162,6 +164,7 @@ class adwin_electromigration(Instrument):
                     tmp = self.adw.GetFifo_Float(INS[key], samples)
                     res[key] = self.aio.bit2qty(tmp, name='input',
                                                 absolute=False)
+                    self.adw.Fifo_Clear(INS[key])
         return res
 
 ########################################################################
@@ -169,23 +172,23 @@ class adwin_electromigration(Instrument):
 ########################################################################
 
     def init_electromigration(self, sample_rate, sweep_rate, report_voltage=0,
-                                max_voltage=10, r_limit=0, gatesweep=False, duration=10):
+                                max_voltage=10, r_limit=0, gatesweep=False, gate_dur=10):
         ''' Initialize a electromigration process. '''
         # stop old electromigration process if still running
         if self._state == 'electromigration_ready':
             self.adw.Stop_Process(READOUT_PROCESS_NO)
         # set sample rate
         self.adw.Set_FPar(SAMPLE_RATE, sample_rate)
-        sweep_rate = self.aio.qty2bit(sweep_rate, card=OUTPUT_CARD,
-                                        channel=OUTPUT_CHANNEL, absolute=False)
         report_voltage = self.aio.qty2bit(report_voltage, card=OUTPUT_CARD,
                                         channel=OUTPUT_CHANNEL)
         max_voltage = self.aio.qty2bit(max_voltage, card=OUTPUT_CARD,
                                         channel=OUTPUT_CHANNEL)
+        sweep_rate = self.aio.qty2bit(sweep_rate, card=OUTPUT_CARD,
+                                        channel=OUTPUT_CHANNEL, absolute=False)
         self.adw.Set_FPar(SWEEP_RATE, sweep_rate)
         self.adw.Set_Par(REPORT_VOLTAGE, report_voltage)
         self.adw.Set_Par(MAX_VOLTAGE, max_voltage)
-        self.set_gate_sweep(gatesweep, duration)
+        self.set_gate_sweep(gatesweep, gate_dur)
         self.set_r_limit(r_limit)
 
         # set input
@@ -350,6 +353,7 @@ class adwin_electromigration(Instrument):
         # Initialize output_buffer to 0V for all outputs as bits
         output_buffer = self.aio.output_zero_dict()
         # Depending on detected firmware read the current outputs
+        output_values = {name: 0 for name in self.aio.list_connected_outputs()}
         if firmware == 'SPIN-TRANSISTOR':
             output_buffer.update(self.read_outputs(out_format='bit'))
             output_values = self.read_outputs(out_format='qty')
@@ -386,7 +390,7 @@ class adwin_electromigration(Instrument):
             log.critical(msg)
         else:
             #boot adwin
-            btl_name = f'ADwin{processor.replace('T', '')}.btl'
+            btl_name = f"ADwin{processor.replace('T', '')}.btl"
             btl_path = Path(self.adw.ADwindir) / btl_name
             self.adw.Boot(str(btl_path))
 
