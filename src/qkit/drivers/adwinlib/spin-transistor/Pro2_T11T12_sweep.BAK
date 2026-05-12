@@ -51,8 +51,11 @@
 
 dim start1, start2, start3, start4, start5, start6, start7, start8, cycle, steps as long
 dim inc1, inc2, inc3, inc4, inc5, inc6, inc7, inc8 as float
+#IF Processor = T12 THEN
+dim sweep_target[nb_outs] as long
+#ELSE
 dim sweep_target[nb_outs] as long at dm_local 
-
+#ENDIF
 
 init:
   'SET PROCESSDELAY

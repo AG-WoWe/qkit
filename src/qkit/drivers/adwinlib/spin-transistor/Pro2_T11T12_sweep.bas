@@ -10,7 +10,7 @@
 ' Optimize                       = Yes
 ' Optimize_Level                 = 1
 ' Stacksize                      = 1000
-' Info_Last_Save                 = DESKTOP-0M2IFQQ  DESKTOP-0M2IFQQ\kaptn
+' Info_Last_Save                 = JOSH-LAPTOP  JOSH-LAPTOP\joshu
 '<Header End>
 'Sweeps for spin transistor measurements written by Luca Kosche in April 2024
 'This script is written sweep up to all outputs in the most efficient way on T11 and 16-bit output card.
