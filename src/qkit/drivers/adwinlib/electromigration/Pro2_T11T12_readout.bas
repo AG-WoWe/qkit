@@ -18,7 +18,7 @@
 #define output_card       3
 #define output_channel    8         'Output channel for fast to zero voltage control
 #define input_card        2
-#define input_channel     5         'Input channel readout of voltage
+#define input_channel     8         'Input channel readout of voltage
 #define version           02010001h 'Version: Electromigration.readout.0.1
 
 #define process_time      2E-6      'time of one event cycle (=500kHz)
