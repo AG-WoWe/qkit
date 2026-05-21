@@ -135,7 +135,7 @@ class Measure1D:
         self.tune.qviewkit_singleInstance = True
 
         # Working points (initialized after adwin available)
-        adwin_outputs = self.adwin.list_connected_outputs()
+        adwin_outputs = self.adwin.do_get_adwin_outputs()
         self.wp_start = WorkingPoint(adwin_outputs, magnet='vector3d')
         self.wp_stop = WorkingPoint(adwin_outputs, magnet='vector3d')
 
@@ -228,12 +228,12 @@ class Measure1D:
         # sweep to pulse value (amp + temp)
         self.wp_start.set(**{self._pulse['name']: self._pulse['amp']+temp})
         duration = self._pulse['amp'] / self._pulse['rate']
-        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
+        self.adwin.start_sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
         # wait for pulse duration
         time.sleep(self._pulse['pulse_duration'])
         # sweep back to temp value
         self.wp_start.set(**{self._pulse['name']: temp})
-        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
+        self.adwin.start_sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
 
     def trigger_trace(self):
         ''' trigger trace sweep if live readout and initialize data dict'''
@@ -251,7 +251,7 @@ class Measure1D:
         if self._sweep_readout_freq == 0:
             pass
         else:
-            self.adwin.sweep(self.wp_stop.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
+            self.adwin.start_sweep(self.wp_stop.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
 
     def trigger_retrace(self):
@@ -270,7 +270,7 @@ class Measure1D:
         if self._sweep_readout_freq == 0:
             pass
         else:
-            self.adwin.sweep(self.wp_start.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
+            self.adwin.start_sweep(self.wp_start.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
     
     def trigger_difference(self):
@@ -290,13 +290,13 @@ class Measure1D:
         samples = len(self._sweep['values'])
         if self._sweep_readout_freq == 0:
             if self._sweep['name'] == 'time':
-                trace = self.adwin.measure(duration=self._sweep['duration'])
+                trace = self.adwin.measure_static(duration=self._sweep['duration'])
             else:
-                trace = self.adwin.sweep_measure(self.wp_stop.outs,
+                trace = self.adwin.measure_sweep(self.wp_stop.outs,
                                              duration=self._sweep['duration'])
             trace = {key: self.correct_len(val, samples) for key, val in trace.items() if val is not None}
         else:
-            trace = self.adwin._fetch_data_from_fifos()
+            trace = self.adwin.do_get_fifo_data()
         return self.calc_trace_saves(trace,'trace')
 
     def measure_retrace(self):
@@ -307,14 +307,14 @@ class Measure1D:
 
         if self._sweep_readout_freq == 0:
             if self._sweep['name'] == 'time':
-                retrace = self.adwin.measure(duration=self._sweep['duration'])
+                retrace = self.adwin.measure_static(duration=self._sweep['duration'])
             else:
-                retrace = self.adwin.sweep_measure(self.wp_start.outs,
+                retrace = self.adwin.measure_sweep(self.wp_start.outs,
                                              duration=self._sweep['duration'])
             samples = len(self._sweep['values'])
             retrace = {key: self.correct_len(val, samples) for key, val in retrace.items() if val is not None}
         else:
-            retrace = self.adwin._fetch_data_from_fifos()
+            retrace = self.adwin.do_get_fifo_data()
         return self.calc_trace_saves(retrace,'retrace')
 
     def calc_trace_saves(self, data, trace):
@@ -411,8 +411,8 @@ class Measure1D:
     def update_lockin(self):
         ''' updates the sample rate and lockin frequency data in the script
         with real data readout from adwin -> no new lockin signal'''
-        self.set_lockin(**{'freq': self.adwin.get_lockin_frequency(),
-                           'sample_rate':self.adwin.get_sample_rate()})
+        self.set_lockin(**{'freq': self.adwin.do_get_lockin_frequency(),
+                           'sample_rate':self.adwin.do_get_sample_rate()})
 
     def start_lockin(self):
         ''' start lockin signal'''
@@ -433,7 +433,7 @@ class Measure1D:
 
     def sweep_to_startpoint(self):
         ''' start sweep from adwin outputs to the first wp of the measurement'''
-        outs_start = self.adwin.read_outputs(out_format='qty', select='connected')
+        outs_start = self.adwin.do_get_output_buffer(out_format='qty', select='connected')
         # Find the sweep time to the first wp of the measurement by
         # comparing the necessary sweep times for each output
         sweep_time = 0.01
@@ -441,7 +441,7 @@ class Measure1D:
             duration = abs(val - outs_start[key]) / self.valids['maxrate'][key]
             sweep_time = max(sweep_time, duration)
         log.info(f"Sweeping to start point in {sweep_time:.3f}s!")
-        self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
+        self.adwin.start_sweep(self.wp_start.outs, duration=sweep_time)
 
 # ------------------- Input creation & registration via tune -------------------
 
@@ -980,7 +980,7 @@ class Measure2D(Measure1D):
         for key, val in self.wp_start.outs.items():
             dur_by_rate = abs(val - temp_wp_outs[key]) / self.valids['maxrate'][key]
             dur = max(dur, dur_by_rate)
-        self.adwin.sweep(self.wp_start.outs, duration=dur)
+        self.adwin.start_sweep(self.wp_start.outs, duration=dur)
         # implement wait time
         if self._step['wait_time']:
             time.sleep(self._step['wait_time'])
