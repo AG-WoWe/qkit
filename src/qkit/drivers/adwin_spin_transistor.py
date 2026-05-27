@@ -60,7 +60,7 @@ from qkit.core.instrument_base import Instrument
 from qkit.drivers.adwinlib.io_handler import AdwinIO, AdwinModeError
 from qkit.drivers.adwinlib.io_handler import AdwinLimitError
 from qkit.drivers.adwinlib.io_handler import AdwinArgumentError
-from qkit.drivers.adwinlib.fw_decoder import decode_adbasic_firmware
+from qkit.drivers.adwinlib.fw_decoder import decode_adbasic_firmware, AdwinFirmwareError
 from qkit.drivers.adwinlib.nanoqt_tools import read_nanoqt_outputs
 
 # These constants have to be synchronised with the definitions in the
@@ -116,10 +116,6 @@ MAX_FREQUENCY = 40E3 # too high frequency might suffer from jitter
 
 LOCKIN_PROCESS_NO = 1
 SWEEP_PROCESS_NO = 2
-
-class AdwinFirmwareError(Exception):
-    """ Error raised, when Firmware running on Adwin is not compatible
-        with python adwin driver"""
 
 class adwin_spin_transistor(Instrument):
     ''' ADwin driver to handle kHz lockin + readout while performing

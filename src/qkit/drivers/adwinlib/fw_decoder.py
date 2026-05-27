@@ -16,6 +16,10 @@ Example in hex representation of the 4 bitfields:
 12b3h -> 1.2.11.3 -> Spin-Transistor: Sweep_process: version 11.3
 """
 
+class AdwinFirmwareError(Exception):
+    """ Error raised, when Firmware running on Adwin is not compatible
+        with python adwin driver"""
+
 FIRMWARE_CODE = {'0': 'NANOQT',
                  '1': 'SPIN-TRANSISTOR',
                  '2': 'ELECTROMIGRATION'}
@@ -54,5 +58,8 @@ def decode_adbasic_firmware(fw_int32):
 
     # DETECT VERSION
     version = '.'.join(fw_code.split('.')[1:])
+
+    if software == 'unknown':
+        raise AdwinFirmwareError("Unknown firmware version")
 
     return software, version
