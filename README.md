@@ -49,7 +49,7 @@ source venv/bin/activate
 ```
 or Windows:
 ```bat
-.\venv\bin\activate.bat
+.\venv\Scripts\activate.bat
 ```
 
 
