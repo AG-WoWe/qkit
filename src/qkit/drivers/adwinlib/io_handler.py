@@ -276,6 +276,9 @@ class AdwinIO():
         if name is None:
             if card is not None and channel is not None:
                 name = self.get_name(card, channel)
+            else:
+                log.critical(f'Adwin: Output/Input not known {card,channel}.')
+
         return self._ports[name]['scale']
 
     def get_bits(self, name:str=None, card:int=None, channel:int=None):
@@ -292,6 +295,10 @@ class AdwinIO():
     def list_all_outputs(self):
         ''' List names of all outputs of the ADwin '''
         return list(self.__hard_config['outputs']) + list(self.__hard_config['nc'])
+
+    def list_connected_inputs(self):
+        ''' List names of connected inputs of the ADwin '''
+        return list(self.__hard_config['inputs'])
 
     def get_config(self):
         ''' Return current adwin configuration (ports,IVconv,dviv) ''' 

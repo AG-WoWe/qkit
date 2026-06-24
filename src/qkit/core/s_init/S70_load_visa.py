@@ -4,7 +4,6 @@
 """
 import qkit
 import logging
-from pkgutil import find_loader
 
 
 def _load_visa():
@@ -18,9 +17,11 @@ def _load_visa():
         raise type(e)('Failed loading visa. Check if you have NI VISA or pyvisa-py installed. Original error: ' + str(e))
     else:
         from pkg_resources import get_distribution
-        from distutils.version import LooseVersion
-        if LooseVersion(get_distribution('pyvisa').version) < LooseVersion("1.5.0"):
+        # from distutils.version import LooseVersion
+        # if LooseVersion(get_distribution('pyvisa').version) < LooseVersion("1.5.0"):
+        if parse(version('pyvisa')) < parse("1.5.0"):
             logging.warning("Old pyvisa version loaded. Please update to a version > 1.5.x")
+            # logging.warning("Old pyvisa version loaded. Please update to a version > 1.5.x")
             # compatibility with old visa lib
             qkit.visa = visa
             qkit.visa.__version__ = get_distribution('pyvisa').version

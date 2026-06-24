@@ -9,7 +9,7 @@
 ' Optimize                       = Yes
 ' Optimize_Level                 = 1
 ' Stacksize                      = 1000
-' Info_Last_Save                 = DESKTOP-0M2IFQQ  DESKTOP-0M2IFQQ\kaptn
+' Info_Last_Save                 = JOSH-LAPTOP  JOSH-LAPTOP\joshu
 '<Header End>
 ' ADwin lockin driver written by Luca Kosche in April 2024
 ' Idea:
@@ -52,7 +52,7 @@
 #define input_channel     8
 #define lockin_card       3
 #define lockin_channel    8           'this cannot simply changed here, but also needs to implemented fo2 adding lockin to channel
-#define version           01010002h 'Version: Spintransistor.lockin.0.2 (2 for 4stageLP)
+#define version           01010002h   'Version: Spintransistor.lockin.0.2 (2 for 4stageLP)
 
 #define process_time      2E-6        'time of one event cycle (=500kHz)
 #define DAC_ZERO          32768
@@ -89,17 +89,20 @@
 'dim measure_cycle as long
 
 dim lockin_in, lockin_out as long
-dim fifo_inphase[fifo_len], fifo_quadrature[fifo_len] as float as fifo
-dim fifo_input[fifo_len] as long as fifo
 dim subsampling_counter, subsampling_samples as long
 dim lockin_samples, lockin_idx as long
 dim inph_dem, quad_dem, inph, quad as float
 
 #IF Processor = T12 THEN
-dim lockin_sig[lockin_len] as long    'lockin output signal in bit steps for output card
-dim lockin_ref[lockin_len] as float   'lockin internal reference
-dim lockin_ref90[lockin_len] as float '90 degree shifted reference (more memory but faster calculation)
+dim fifo_inphase[fifo_len] as float32 as fifo at uncacheable
+dim fifo_quadrature[fifo_len] as float32 as fifo at uncacheable
+dim fifo_input[fifo_len] as long as fifo at uncacheable
+dim lockin_sig[lockin_len] as long at cacheable    'lockin output signal in bit steps for output card
+dim lockin_ref[lockin_len] as float at cacheable   'lockin internal reference
+dim lockin_ref90[lockin_len] as float at cacheable '90 degree shifted reference (more memory but faster calculation)
 #ELSE                                 'T11 can save the arrays in local memory:
+dim fifo_inphase[fifo_len], fifo_quadrature[fifo_len] as float as fifo
+dim fifo_input[fifo_len] as long as fifo
 dim lockin_sig[lockin_len] as long at dm_local
 dim lockin_ref[lockin_len] as float at dm_local
 dim lockin_ref90[lockin_len] as float at dm_local

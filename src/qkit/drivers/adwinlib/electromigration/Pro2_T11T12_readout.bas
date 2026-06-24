@@ -9,16 +9,16 @@
 ' Optimize                       = Yes
 ' Optimize_Level                 = 1
 ' Stacksize                      = 1000
-' Info_Last_Save                 = DESKTOP-H3MR9LF  DESKTOP-H3MR9LF\joshu
+' Info_Last_Save                 = JOSH-LAPTOP  JOSH-LAPTOP\joshu
 '<Header End>
 
 #Include ADwinPro_All.inc
 
 'hard coded settings
 #define output_card       3
-#define output_channel    8
+#define output_channel    8         'Output channel for fast to zero voltage control
 #define input_card        2
-#define input_channel     8
+#define input_channel     8         'Input channel readout of voltage
 #define version           02010001h 'Version: Electromigration.readout.0.1
 
 #define process_time      2E-6      'time of one event cycle (=500kHz)
@@ -28,12 +28,12 @@
 'communication PC ADwin
 #define fw_version          Par_1
 #define readout_active      Par_3       'readout active flag
-#define emergency_stop      Par_12      'emergency stop
-#define voltage             Par_38      'last voltage applied
+#define emergency_stop      Par_4       'emergency stop
 #define report_voltage      Par_8       'source-drain voltage to start abort script (bits)
-#define r_limit             FPar_1      'resist boundary to stop sweep (bits)
-#define sample_rate         FPar_8      'command from PC: set sample rate (Hz) for subsampling
-#define report_sample_rate  FPar_9      'report to PC: current sample rate (Hz)
+#define voltage             Par_38      'last voltage applied
+#define r_limit             FPar_1      'resist boundary to stop sweep
+#define sample_rate         FPar_9      'command from PC: set sample rate (Hz) for subsampling
+#define report_sample_rate  FPar_39     'report to PC: current sample rate (Hz)
 #define subsampling_counter Par_40
 #define fifo_raw            Data_1
 
@@ -41,9 +41,12 @@
 'EVENT VARIABLES
 dim sweep_in as long
 dim subsampling_samples as long
-dim resist as float
 dim fifo_raw[fifo_len] as long as fifo
-
+#IF Processor = T12 THEN
+dim resist as float32
+#ELSE
+dim resist as float
+#ENDIF
 
 init:
   'SET PROCESSDELAY

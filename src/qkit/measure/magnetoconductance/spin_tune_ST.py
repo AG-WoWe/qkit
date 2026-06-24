@@ -108,7 +108,7 @@ class Tuning_ST(Tuning):
         assert self._x_parameter, f"{__name__}: Cannot start measure2D. x_parameters required."
         assert self._y_parameter, f"{__name__}: Cannot start measure2D. y_parameters required."
         self._measurement_object.measurement_func = f"{__name__}: measure2D"
-        self.pb = Progress_Bar(len(self._x_parameter.values)*len(self._y_parameter.values)*len(self.multiplexer.get_active_measurements()))
+        self.pb = Progress_Bar(len(self._x_parameter.values))
 
         self._open_qviewkit(datasets = data_to_show)
 
@@ -170,7 +170,6 @@ class Tuning_ST(Tuning):
 
                             # Update sweep_samples and progress bar
                             sweep_samples += len_latest_data
-                            self.pb.iterate(addend = len_latest_data)
 
                             # Check for watchdog stop
                             if self.watchdog.stop:
@@ -180,6 +179,8 @@ class Tuning_ST(Tuning):
                                 for key in latest_data:
                                     self._append_vector({key: [nan]*(len(self._x_parameter.values)-sweep_samples)}, self._datasets, direction = 1, pointwise=True)
                                 break
+                    
+                self.pb.iterate(addend = 1)
 
         finally:
             self.watchdog.reset()

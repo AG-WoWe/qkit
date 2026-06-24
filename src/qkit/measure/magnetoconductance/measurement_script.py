@@ -135,7 +135,7 @@ class Measure1D:
         self.tune.qviewkit_singleInstance = True
 
         # Working points (initialized after adwin available)
-        adwin_outputs = self.adwin.list_connected_outputs()
+        adwin_outputs = self.adwin.do_get_adwin_outputs()
         self.wp_start = WorkingPoint(adwin_outputs, magnet='vector3d')
         self.wp_stop = WorkingPoint(adwin_outputs, magnet='vector3d')
 
@@ -224,15 +224,16 @@ class Measure1D:
         time.sleep(self._pulse['pre_delay'])
         # save current value of pulse var
         temp = self.wp_start.outs[self._pulse['name']]
+
         # sweep to pulse value (amp + temp)
         self.wp_start.set(**{self._pulse['name']: self._pulse['amp']+temp})
         duration = self._pulse['amp'] / self._pulse['rate']
-        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
+        self.adwin.start_sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
         # wait for pulse duration
         time.sleep(self._pulse['pulse_duration'])
         # sweep back to temp value
         self.wp_start.set(**{self._pulse['name']: temp})
-        self.adwin.sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
+        self.adwin.start_sweep(self.wp_start.outs, duration=duration, wait=True, clearFIFO=True)
 
     def trigger_trace(self):
         ''' trigger trace sweep if live readout and initialize data dict'''
@@ -250,7 +251,7 @@ class Measure1D:
         if self._sweep_readout_freq == 0:
             pass
         else:
-            self.adwin.sweep(self.wp_stop.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
+            self.adwin.start_sweep(self.wp_stop.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
 
     def trigger_retrace(self):
@@ -269,7 +270,7 @@ class Measure1D:
         if self._sweep_readout_freq == 0:
             pass
         else:
-            self.adwin.sweep(self.wp_start.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
+            self.adwin.start_sweep(self.wp_start.outs, duration=self._sweep['duration'], wait=False, clearFIFO=False)
         return direction
     
     def trigger_difference(self):
@@ -289,13 +290,13 @@ class Measure1D:
         samples = len(self._sweep['values'])
         if self._sweep_readout_freq == 0:
             if self._sweep['name'] == 'time':
-                trace = self.adwin.measure(duration=self._sweep['duration'])
+                trace = self.adwin.measure_static(duration=self._sweep['duration'])
             else:
-                trace = self.adwin.sweep_measure(self.wp_stop.outs,
+                trace = self.adwin.measure_sweep(self.wp_stop.outs,
                                              duration=self._sweep['duration'])
             trace = {key: self.correct_len(val, samples) for key, val in trace.items() if val is not None}
         else:
-            trace = self.adwin._fetch_data_from_fifos()
+            trace = self.adwin.do_get_fifo_data()
         return self.calc_trace_saves(trace,'trace')
 
     def measure_retrace(self):
@@ -306,14 +307,14 @@ class Measure1D:
 
         if self._sweep_readout_freq == 0:
             if self._sweep['name'] == 'time':
-                retrace = self.adwin.measure(duration=self._sweep['duration'])
+                retrace = self.adwin.measure_static(duration=self._sweep['duration'])
             else:
-                retrace = self.adwin.sweep_measure(self.wp_start.outs,
+                retrace = self.adwin.measure_sweep(self.wp_start.outs,
                                              duration=self._sweep['duration'])
             samples = len(self._sweep['values'])
             retrace = {key: self.correct_len(val, samples) for key, val in retrace.items() if val is not None}
         else:
-            retrace = self.adwin._fetch_data_from_fifos()
+            retrace = self.adwin.do_get_fifo_data()
         return self.calc_trace_saves(retrace,'retrace')
 
     def calc_trace_saves(self, data, trace):
@@ -322,19 +323,28 @@ class Measure1D:
         temp = {}
         # first handle all the direct inputs
         for meas, traces in self._temp.items():
-            if meas in self.valids['inputs']:
+            if meas in self.valids['inputs'] and trace in traces:
                 if isinstance(data[meas], np.ndarray):
-                    temp[f'{meas}_{trace}'] = data[meas]
+                    temp[f'{meas}'] = data[meas]
         # then handle all input to be calculated from the direct inputs
         for meas, traces in self._temp.items():
-            if meas in self.valids['calc']:
+            if meas in self.valids['calc'] and trace in traces:
                 func = self.valids['calc_func'][meas]
                 args = self.valids['calc'][meas]
-                if temp.get(f'{args[0]}_{trace}', None) is not None and temp.get(f'{args[1]}_{trace}', None) is not None:
-                    calcs = func(temp.get(f'{args[0]}_{trace}'),
-                          temp.get(f'{args[1]}_{trace}'))
+                if temp.get(f'{args[0]}', None) is not None and temp.get(f'{args[1]}', None) is not None:
+                    calcs = func(temp.get(f'{args[0]}'),
+                          temp.get(f'{args[1]}'))
                     if isinstance(calcs, np.ndarray):
-                        temp[f'{meas}_{trace}'] = calcs
+                        temp[f'{meas}'] = calcs
+
+        # correct len (for live-readout)
+        samples = len(self._sweep['values'])
+        for meas, traces in self._save.items():
+            if trace in traces:
+                index = len(temp[f'{meas}']) - samples
+                if index < 0 and index >= -3:
+                    temp[f'{meas}'] = np.append(temp[f'{meas}'], [temp[f'{meas}'][-1]] * abs(index))
+        
         # save temp saves for difference calculations
         match trace:
             case 'trace':
@@ -354,8 +364,8 @@ class Measure1D:
         save = {}
         for meas, traces in self._save.items():
             if trace in traces:
-                if temp.get(f'{meas}_{trace}', None) is not None and not None in temp[f'{meas}_{trace}']:
-                    save[f'{meas}_{trace}'] = temp[f'{meas}_{trace}']
+                if temp.get(f'{meas}', None) is not None and not None in temp[f'{meas}']:
+                    save[f'{meas}'] = temp[f'{meas}']
         return save
     
 
@@ -365,14 +375,14 @@ class Measure1D:
         save = {}
         for meas, traces in self._save.items():
             if "difference" in traces:
-                if len(self.trace[f'{meas}_trace']) == len(self.retrace[f'{meas}_retrace']):
-                    save[f'{meas}_difference'] = np.flip(self.retrace[f'{meas}_retrace']) - self.trace[f'{meas}_trace']
-                elif len(self.trace[f'{meas}_trace']) < len(self.retrace[f'{meas}_retrace']):
-                    n = len(self.trace[f'{meas}_trace'])
-                    save[f'{meas}_difference'] = np.flip(self.retrace[f'{meas}_retrace'])[:n] - self.trace[f'{meas}_trace']
-                elif len(self.trace[f'{meas}_trace']) > len(self.retrace[f'{meas}_retrace']):
-                    n = len(self.retrace[f'{meas}_retrace'])
-                    save[f'{meas}_difference'] = np.flip(self.retrace[f'{meas}_retrace']) - self.trace[f'{meas}_trace'][:n]
+                if len(self.trace[f'{meas}']) == len(self.retrace[f'{meas}']):
+                    save[f'{meas}'] = np.flip(self.retrace[f'{meas}']) - self.trace[f'{meas}']
+                elif len(self.trace[f'{meas}']) < len(self.retrace[f'{meas}']):
+                    n = len(self.trace[f'{meas}'])
+                    save[f'{meas}'] = np.flip(self.retrace[f'{meas}'])[:n] - self.trace[f'{meas}']
+                elif len(self.trace[f'{meas}']) > len(self.retrace[f'{meas}']):
+                    n = len(self.retrace[f'{meas}'])
+                    save[f'{meas}'] = np.flip(self.retrace[f'{meas}']) - self.trace[f'{meas}'][:n]
         return save
 
 
@@ -401,8 +411,8 @@ class Measure1D:
     def update_lockin(self):
         ''' updates the sample rate and lockin frequency data in the script
         with real data readout from adwin -> no new lockin signal'''
-        self.set_lockin(**{'freq': self.adwin.get_lockin_frequency(),
-                           'sample_rate':self.adwin.get_sample_rate()})
+        self.set_lockin(**{'freq': self.adwin.do_get_lockin_frequency(),
+                           'sample_rate':self.adwin.do_get_sample_rate()})
 
     def start_lockin(self):
         ''' start lockin signal'''
@@ -423,7 +433,7 @@ class Measure1D:
 
     def sweep_to_startpoint(self):
         ''' start sweep from adwin outputs to the first wp of the measurement'''
-        outs_start = self.adwin.read_outputs(out_format='qty', select='connected')
+        outs_start = self.adwin.do_get_output_buffer(out_format='qty', select='connected')
         # Find the sweep time to the first wp of the measurement by
         # comparing the necessary sweep times for each output
         sweep_time = 0.01
@@ -431,7 +441,7 @@ class Measure1D:
             duration = abs(val - outs_start[key]) / self.valids['maxrate'][key]
             sweep_time = max(sweep_time, duration)
         log.info(f"Sweeping to start point in {sweep_time:.3f}s!")
-        self.adwin.sweep(self.wp_start.outs, duration=sweep_time)
+        self.adwin.start_sweep(self.wp_start.outs, duration=sweep_time)
 
 # ------------------- Input creation & registration via tune -------------------
 
@@ -445,7 +455,7 @@ class Measure1D:
         self.inputs_dict = {}
         for key, val in self._save.items():
             for key1 in val:
-                self.inputs_dict[f'{key}_{key1}'] = self.valids['unit'][key]
+                self.inputs_dict[f'{key}'] = self.valids['unit'][key]
 
     def set_node_bounds(self):
         ''' set bounds for data input dict'''
@@ -642,29 +652,31 @@ class Measure1D:
             for trd in traces:
                 match trd:
                     case 'trace':
-                        plotted_data.append(f'measure_trace.{meas}_{trd}')
+                        plotted_data.append(f'measure_trace.{meas}')
                     case 'retrace':
-                        plotted_data.append(f'measure_retrace.{meas}_{trd}')
+                        plotted_data.append(f'measure_retrace.{meas}')
                     case 'difference':
-                        plotted_data.append(f'calc_difference.{meas}_{trd}')
+                        plotted_data.append(f'calc_difference.{meas}')
         self._plot_dss = plotted_data or None
 
     def add_view(self):
         ''' add 1D view trace and retrace in one plot'''
-        for key in self.inputs_dict:
-            if 'retrace' in key:
+        for key in self._save:
+            trd = self._save.get(key,[])
+            if trd:
                 view = self.tune._data_file.add_view(
-                    name=key.replace("_retrace", ""),
+                    name=key,
+                    x=self.tune._coordinates[self._x_parameter.name],
+                    y=self.tune._datasets['measure_trace.' + key]
+                )
+            if 'retrace' in trd:
+                view.add(
                     x=self.tune._coordinates[self._x_parameter.name],
                     y=self.tune._datasets['measure_retrace.' + key]
                 )
-                view.add(
-                    x=self.tune._coordinates[self._x_parameter.name],
-                    y=self.tune._datasets['measure_trace.' + key.replace("retrace", "trace")]
-                )
-            if "difference" in key:
+            if "difference" in trd:
                 self.tune._data_file.add_view(
-                    name=key,
+                    name=key+'_difference',
                     x=self.tune._coordinates[self._x_parameter.name],
                     y=self.tune._datasets['calc_difference.' + key]
                 )
@@ -895,18 +907,11 @@ class Measure2D(Measure1D):
             log.info("Couldn't generate step value list, inputs missing! Falling back to 1D behavior.")
             self._step['values'] = None
             return
-        if start <= stop:
-            steps = np.arange(start, stop + step, step)
-            print(start, stop, steps)
-            print(steps[-1])
-            if steps[-1] > stop:
-                steps = steps[:-1]
-            print(start, stop, steps)
-        else:
-            steps = np.arange(start, stop - step, -step)
-            if steps[-1] < stop:
-                steps = steps[:-1]
-        self._step['values'] = np.array(steps, dtype=np.float32)
+        step_count = round(abs(start-stop)/step)+1
+        log.info("Generate step values!")
+        step_values = np.linspace(start, stop, step_count)
+        # save step_values as float32
+        self._step['values'] = np.array(step_values, dtype=np.float32)
         log.info("Generated step values!")
 
     def prepare_measurement_datasets(self):
@@ -975,7 +980,7 @@ class Measure2D(Measure1D):
         for key, val in self.wp_start.outs.items():
             dur_by_rate = abs(val - temp_wp_outs[key]) / self.valids['maxrate'][key]
             dur = max(dur, dur_by_rate)
-        self.adwin.sweep(self.wp_start.outs, duration=dur)
+        self.adwin.start_sweep(self.wp_start.outs, duration=dur)
         # implement wait time
         if self._step['wait_time']:
             time.sleep(self._step['wait_time'])
@@ -990,20 +995,22 @@ class Measure2D(Measure1D):
 
     def add_view(self):
         ''' add 1D and 2D views'''
-        for key in self.inputs_dict:
-            if 'retrace' in key:
+        for key in self._save:
+            trd = self._save.get(key,[])
+            if trd:
                 view = self.tune._data_file.add_view(
-                    name=key.replace("_retrace", ""),
+                    name=key,
+                    x=self.tune._coordinates[self._y_parameter.name],
+                    y=self.tune._datasets['measure_trace.' + key]
+                )
+            if 'retrace' in trd:
+                view.add(
                     x=self.tune._coordinates[self._y_parameter.name],
                     y=self.tune._datasets['measure_retrace.' + key]
                 )
-                view.add(
-                    x=self.tune._coordinates[self._y_parameter.name],
-                    y=self.tune._datasets['measure_trace.' + key.replace("retrace", "trace")]
-                )
-            if "difference" in key:
+            if "difference" in trd:
                 self.tune._data_file.add_view(
-                    name=key,
+                    name=key+'_difference',
                     x=self.tune._coordinates[self._y_parameter.name],
                     y=self.tune._datasets['calc_difference.' + key]
                 )
