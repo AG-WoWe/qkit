@@ -92,11 +92,11 @@ class ZI_DAQ_module(Instrument):
         
         self.add_parameter("daqM_grid_num_samples", type = int,
                            flags = self.FLAG_GETSET,
-                           minval = 2)
+                           minval = 1)
         
         self.add_parameter("daqM_grid_num_measurements", type = int,
                           flags = self.FLAG_GETSET,
-                          minval = 2)
+                          minval = 1)
         
         self.add_parameter("daqM_grid_direction", type = str,
                            flags = self.FLAG_GETSET)
