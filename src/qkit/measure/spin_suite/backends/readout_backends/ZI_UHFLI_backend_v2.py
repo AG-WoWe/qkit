@@ -17,7 +17,7 @@ class ZI_UHFLI_backend_v2(RO_backend_base):
         
         
         self.settings = {"demod0" : {"trig_type" : "HW_trigger",
-                                    "trig_channel" : 3,
+                                    "trig_channel" : 1,
                                     "trig_edge" : "rising",
                                     "trig_holdoff_count" : 0,
                                     "trig_software_delay" : 0,                              
