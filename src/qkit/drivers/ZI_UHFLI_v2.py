@@ -13,13 +13,17 @@ import numpy as np
 import time
 import logging
 
+logger = logging.getLogger(__name__)
 
 class ZI_UHFLI_v2(Instrument):
-
+    
+    #     name (string)    : name of the instrument   ("UHFLI")
+    #     device_id : serial number of the instrument ("dev2587")
     def __init__(self, name, device_id, host="localhost"):
         super().__init__(name, tags=["physical", "lock-in amplifier"])
         self._device_id = device_id
         
+        # trigger mode in numers
         self._trigger_mode_dict = {"continuous" : 0,
                                    "in3_rising" : 1,
                                    "in3_falling" : 2,
@@ -41,6 +45,8 @@ class ZI_UHFLI_v2(Instrument):
                                       "inverted" : 1,
                                       "in1-in2" : 2,
                                       "in2-in1" : 3}
+                                      
+        # setteling times in units of time constant from selected Filter
         self._filter_settling_factors = {r"63.2%" : [1.0, 2.15, 3.26, 4.35, 
                                                    5.43, 6.51, 7.58, 8.64],
                                          r"90%" : [2.3, 3.89, 5.32, 6.68, 
@@ -49,22 +55,24 @@ class ZI_UHFLI_v2(Instrument):
                                                    11.6, 13.11, 14.57, 16]}
         self._inv_difference_mode_dict = {v: k for k, v in self._difference_mode_dict.items()}
                 
-        #Set the apilevel to the highest supported by your device, to unlock most of the functionalities.
-        #Create an apisession, to be able to control the device from python.     
+        #Set the apilevel to the highest supported by your device, to unlock most of the functionalities.     
         self._apilevel = 6
         self._bad_device_message = "No UHFLI device found."
-
+        
+        #Create an apisession, to be able to control the device from python.
         # -------- zhinst-toolkit ----------
         self._session = Session(host)
         self._device = self._session.connect_device(device_id)
 
-        logging.info(f"{__name__}: Connected to {device_id}")
+        #logging.info(f"{__name__}: Connected to {device_id}")
+        logger.info(f"{__name__}: Connected to {device_id}")
 
         # -------- DAQ ----------
         #self._subscribed_demods = []
         #self.integration_time = 0.05
         #self.timeout = 0.1
-
+        
+        # Add Instrument parameters for qkit compatibility
         # ================= PARAMETERS =================
 
         # INPUTS
@@ -221,7 +229,11 @@ class ZI_UHFLI_v2(Instrument):
         step_recovery = self.get(f"dem{demod_index}_step_recovery")
         tc = float(self._device.demods[demod_index].timeconstant())
         order = int(self._device.demods[demod_index].order())
-        return tc * self._filter_settling_factors[step_recovery][order - 1]
+        value = tc * self._filter_settling_factors[step_recovery][order - 1]
+        #print(value)
+        return value
+        #print(tc * self._filter_settling_factors[step_recovery][order - 1])
+        #return tc * self._filter_settling_factors[step_recovery][order - 1]
 
         
     def wait_settle_time(self, demod_index):
@@ -404,8 +416,9 @@ class ZI_UHFLI_v2(Instrument):
         return bool(self._device.sigouts[channel].on())
     
     def _do_set_output_50ohm(self, onoff, channel):
-        state = "50Ω" if onoff else "HiZ"
-        logging.debug("%s: setting expected load on output channel %d to %s", __name__, channel, state)
+        state = "50ohm" if onoff else "HiZ"
+        logging.info("%s : setting expected load on output channel %d to %s", __name__, channel, state)
+        logger.info("%s : setting expected load on output channel %d to %s", __name__, channel, state)
         if onoff:
             self.set_parameter_bounds(f"ch{channel}_output_range", 75e-3, 750e-3)
         else:
@@ -417,11 +430,17 @@ class ZI_UHFLI_v2(Instrument):
         logging.debug("%s: getting expected load impedance of output channel %d",__name__, channel)
         return bool(self._device.sigouts[channel].imp50())
     
-    def _do_set_output_range(self, newrange, channel):
+    def _do_set_output_range(self, newrange, channel, matching_50ohm = False):
         valuesarray = np.array([75e-3, 750e-3])
-        if not bool(self._device.sigouts[channel].imp50()):
-            valuesarray = 2 * valuesarray
-        if newrange not in valuesarray:
+        if matching_50ohm:
+            self._device.sigouts[channel].imp50(True)
+        else: 
+            self._device.sigouts[channel].imp50(False)
+            
+            
+        if not bool(self._device.sigouts[channel].imp50()):                     # no 50Ohm matching
+            valuesarray = 2 * valuesarray                                       # 150mV to 1.5V range
+        if newrange not in valuesarray:                                         # 50Ohm matching
             index = np.searchsorted(valuesarray, newrange, side="right") - 1
             newrange = valuesarray[index if index >= 0 else 0]
             logging.warning("%s: invalid output range value, setting to next lower value: %.3g",__name__, newrange)
