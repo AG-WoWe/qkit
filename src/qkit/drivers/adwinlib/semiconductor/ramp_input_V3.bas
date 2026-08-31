@@ -6,12 +6,12 @@
 ' Priority                       = Low
 ' Priority_Low_Level             = 10
 ' Version                        = 1
-' ADbasic_Version                = 6.3.1
+' ADbasic_Version                = 6.4.0
 ' Optimize                       = Yes
 ' Optimize_Level                 = 1
 ' Stacksize                      = 1000
-' Info_Last_Save                 = PHI-LISTER-W  PHI-LISTER-W\nanospin
-' Bookmarks                      = 41,154,417,418,426,430
+' Info_Last_Save                 = DESKTOP-VJN2OMA  DESKTOP-VJN2OMA\nanospin
+' Bookmarks                      = 41,158,421,422,430,434
 '<Header End>
 'Copy ramps_inputs.bas and ramps_inputs.TC1 into folder of your choice and initialize with QKit'
 'ADPro: modules 1-14 are DACs, while module 15 should be an ADC. 
@@ -89,7 +89,9 @@ Dim stopvalue, rampvalue, difference, speed as Float
 #Define run_Par Par_76
 #Define ramping_speed_FPar FPar_77
 #Define channel_Par Par_78
-
+#Define ramping_speed_safe_port_1_FPar FPar_72
+#Define ramping_speed_safe_port_2_FPar FPar_73
+#Define ramping_speed_safe_port_3_FPar FPar_74
 
 Init:  
   '2us process delay for T12 processor, Analog outs are 500kHz so 2000 makes sense
@@ -146,6 +148,9 @@ Init:
   gate_number_Par = 200 'number of gates'
   run_Par = 0   'run variable'
   ramping_speed_FPar = 0.1  'ramping speed'
+  ramping_speed_safe_port_1_FPar = 0.1
+  ramping_speed_safe_port_2_FPar = 0.1
+  ramping_speed_safe_port_3_FPar = 0.1
   channel_Par = 0   'channel which is ramped'
    
   'number of skips between minimal increments'
@@ -203,11 +208,11 @@ Event:
               'The ramping speed is not increased for safe ports of the voltage range is lowered by voltage dividers.
               SelectCase channel
                 Case 1 
-                  skips_total = 102 'x-coil speed 
+                  skips_total = Round(51 / ramping_speed_safe_port_1_FPar * (voltage_range_Data[channel] / 10)) 'x-coil speed 
                 Case 2
-                  skips_total = 102 'y-coil speed 
+                  skips_total = Round(51 / ramping_speed_safe_port_2_FPar * (voltage_range_Data[channel] / 10)) 'y-coil speed 
                 Case 3
-                  skips_total = 102 'z-coil speed 
+                  skips_total = Round(51 / ramping_speed_safe_port_3_FPar * (voltage_range_Data[channel] / 10)) 'z-coil speed 
                 CaseElse
                   skips_total = 102
               EndSelect
@@ -332,11 +337,11 @@ Event:
                   'The ramping speed is not increased for safe ports of the voltage range is lowered by voltage dividers.
                   SelectCase ramped_channels_parallel_Data[iterator_parallel]
                     Case 1 
-                      skips_total_parallel_Data[iterator_parallel] = 102 'x-coil speed 
+                      skips_total_parallel_Data[iterator_parallel] = Round(51 / ramping_speed_safe_port_1_FPar * (voltage_range_Data[channel] / 10)) 'x-coil speed 
                     Case 2
-                      skips_total_parallel_Data[iterator_parallel] = 102 'y-coil speed 
+                      skips_total_parallel_Data[iterator_parallel] = Round(51 / ramping_speed_safe_port_2_FPar * (voltage_range_Data[channel] / 10)) 'y-coil speed 
                     Case 3
-                      skips_total_parallel_Data[iterator_parallel] = 102 'z-coil speed 
+                      skips_total_parallel_Data[iterator_parallel] = Round(51 / ramping_speed_safe_port_3_FPar * (voltage_range_Data[channel] / 10)) 'z-coil speed 
                     CaseElse
                       skips_total_parallel_Data[iterator_parallel] = 102
                   EndSelect
