@@ -204,13 +204,13 @@ class h5plot(object):
         if not self.view_type:
             self.ax.set_xlabel(self.x_label)
             self.ax.set_ylabel(self.y_label)
-            self.ax.xaxis.label.set_fontsize(20)
-            self.ax.yaxis.label.set_fontsize(20)
+            self.ax.xaxis.label.set_fontsize(30)
+            self.ax.yaxis.label.set_fontsize(30)
             self.ax.ticklabel_format(useOffset=False)
             for i in self.ax.get_xticklabels():
-                i.set_fontsize(16)
+                i.set_fontsize(26)
             for i in self.ax.get_yticklabels():
-                i.set_fontsize(16)
+                i.set_fontsize(26)
 
         save_name = str(os.path.basename(self.filedir))[0:6] + '_' + self.key.replace('/entry/','').replace('/','_')
         if self.comment:
