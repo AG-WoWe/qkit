@@ -77,6 +77,7 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
     
     # ================= CONVENIENCE =================
     def activate_ch0(self):
+        """Enable demod0, acticate ch0 output, subscribe to demod (easy_sub(dem[chanenl])) and set data nodes 'x', 'y', 'timestamp' """
         self.set_dem0_demod_enable(True)
         self.set_ch0_output(True)
         demods = list(self.get_subscribed_demods())  
@@ -86,6 +87,7 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         self.set_data_nodes(["x", "y", "timestamp"])
 
     def activate_ch1(self):
+        """Enable demod1, activate ch1 output, subscribe to demod (easy_sub([channel]) ans set data nodes 'x', 'y', 'timestamp'"""
         self.set_dem4_demod_enable(True)
         self.set_ch1_output(True)
         demods = list(self.get_subscribed_demods())  
@@ -95,6 +97,7 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         self.set_data_nodes(["x", "y", "timestamp"])
     
     def deactivate_ch0(self):
+        """Disable demod0, deactivate ch0 output"""
         self.set_dem0_demod_enable(False)
         self.set_ch0_output(False)
 
@@ -102,6 +105,7 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         self.easy_sub(demods)
 
     def deactivate_ch1(self):
+        """Disable demod1, deactivate ch2 output"""
         self.set_dem4_demod_enable(False)
         self.set_ch1_output(False)
 
@@ -109,12 +113,27 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
         self.easy_sub(demods)
         
    
-    def sample_dem(self, channel: int, wait_settle_time: bool = True) -> Dict[str, float]:
+    def sample_dem(self, channel: int, wait_settle_time: bool = True, attenuation = 15) -> Dict[str, float]:
+        """
+        One datapoint of 'x', 'y', 'r', 'timestamp'
+        Intendet to be used in a loop which calls the function repeatedly.
+        
+        Parameters
+        ----------
+        channel: int 
+        wait_settle_time: bool (decide it you want to wait each point the calculated setteling_time from 'ZI_UHFLI_v2')
+        
+        Returns
+        -------
+        result: dict[str, float]
+        """
         assert self.get(f"dem{channel}_demod_enable"), f"{__name__}: Demod {channel} is not enabled."
         
+        #wait filter setteling time
         if wait_settle_time:
             self.wait_settle_time(channel)
-
+        
+        #get data
         raw = self._device.demods[channel].sample()   
         nodes = self.get_data_nodes()
         
@@ -127,16 +146,29 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
                 v = v[-1]
             out[f"{node}{channel}"] = float(v)
             #print(float(raw[node]))
-            #out[f"{node}{channel}"] = float(raw[node])  
+            #out[f"{node}{channel}"] = float(raw[node])
+        if channel < 4:
+            outamp0 = self.get_ch0_output_amplitude()     
+        else: 
+            outamp1 = self.get_ch1_output_amplitude()
 
         if "x" in nodes and "y" in nodes:
+            #r0[f"r{channel}"] = float(np.hypot(out[f"x{channel}"], out[f"y{channel}"]))
             out[f"r{channel}"] = float(np.hypot(out[f"x{channel}"], out[f"y{channel}"]))
-            out[f"theta{channel}"] = np.arctan2(out[f"y{channel}"], out[f"x{channel}"])
+            
+            #out[f"theta{channel}"] = np.arctan2(out[f"y{channel}"], out[f"x{channel}"])
         return out
 
    
     
     def easy_sub(self, demod_indices):
+        """
+        Set a subscribtion for demod_indices
+        
+        Parameters
+        ----------
+        demod_indices: int (from 0 to 7)
+        """
         demod_indices = list(demod_indices)
         for d in demod_indices:
             if not isinstance(d, int):
@@ -225,7 +257,7 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
 
             if "x" in nodes and "y" in nodes and f"x{d}" in gotten_traces and f"y{d}" in gotten_traces:
                 gotten_traces[f"r{d}"] = np.hypot(gotten_traces[f"x{d}"], gotten_traces[f"y{d}"])
-            print("TIS ARE THE WONDERFULL TRACES LOOK AND SEE:", gotten_traces)
+            #print("TIS ARE THE WONDERFULL TRACES LOOK AND SEE:", gotten_traces)
 
         return gotten_traces
 
@@ -279,8 +311,20 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
           
     def convert_reader(self, reader, *, v_gain, voltage_divider=False, divider_factor=1.0):
         """
-        Wrappt einen Reader und konvertiert nur x0/y0 (und setzt r0 neu).
-        timestamp0 bleibt unverändert.
+        Wrappt a Reader and convert only x0/y0 (and set r0 new).
+        timestamp0 remains.
+        
+        Parameters
+        ----------
+        reader
+        v_gain
+        voltage_divider: bool
+        divider_factor = 1.0
+        
+        Return
+        ------
+        x|y = (x|y*devider_factor)/v_gain
+        r out of x and y
         """
         def wrapped():
             d = reader()
@@ -323,6 +367,9 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
        
     
     def _do_set_data_nodes(self, newnode):
+        """
+        set data nodes
+        posible nodes: "timestamp", "x", "y", "frequency", "phase", "dio", "trigger", "auxin0", "auxin1" """
         allowed_nodes = {"timestamp", "x", "y", "frequency", "phase", "dio", "trigger", "auxin0", "auxin1"}
         typerr = TypeError("%s: Cannot set %s as data_nodes. Object must be a list of strings." % (__name__, newnode))
         if not isinstance(newnode, list):
@@ -386,7 +433,7 @@ class ZI_UHFLI_SemiCon_v2(lolvl.ZI_UHFLI_v2):
             raise TimeoutError("No FFT data returned from LabOne.")
 
         return result
-
+        
         
         
 #%%
