@@ -59,6 +59,9 @@ Copy driver into qkit/drivers folder.
 'Par_76:      run variable => 1 if device is run'
 'FPar_77:     ramping speed in Volts/second normal ports'
 'Par_78:      channel which is ramped. only it will be changed during an event'
+'FPar_81:     ramping speed in Volts/second safe port 1'
+'FPar_82:     ramping speed in Volts/second safe port 2'
+'FPar_83:     ramping speed in Volts/second safe port 3'
 '''
 
 
@@ -140,7 +143,7 @@ class adwin_semiconductor(Instrument):
                  process_number_triggered=2,
                  process_path_triggered = str(adbasic_dir / 'ADCF_Burst_Event_V3.TC2'),
                  process_number_aquisition=3,
-                 process_path_aquisition = str(adbasic_dir / 'ADCF_Burst_Event_Stopp_V3.TC3'),
+                 process_path_aquisition = str(adbasic_dir / 'ADCF_Burst_Event_Stopp_V4.TC3'),
                  process_number_continuous=4,
                  watch_sampling_f="10kHz",
                  process_path_continuous_2kHz = str(adbasic_dir / 'ADCF_continuous_2kHz_V3.TC4'),
@@ -374,7 +377,22 @@ class adwin_semiconductor(Instrument):
         self.add_parameter('ramping_speed_normal_ports', type=float,
             flags=Instrument.FLAG_GETSET,
             minval=0.0, maxval=100.0)
+            
+        # ramping speed safe port 1 in V/s
+        self.add_parameter('ramping_speed_safe_port_1', type=float,
+            flags=Instrument.FLAG_GETSET,
+            minval=0.0, maxval=100.0)
         
+        # ramping speed safe port 2 in V/s
+        self.add_parameter('ramping_speed_safe_port_2', type=float,
+            flags=Instrument.FLAG_GETSET,
+            minval=0.0, maxval=100.0)
+
+        # ramping speed safe port 3 in V/s
+        self.add_parameter('ramping_speed_safe_port_3', type=float,
+            flags=Instrument.FLAG_GETSET,
+            minval=0.0, maxval=100.0)
+      
         #state of gate X if it uses oversampling =1 or not =0
         self.add_parameter('oversampling_state', type=int,
             flags=Instrument.FLAG_GETSET,
@@ -577,9 +595,32 @@ class adwin_semiconductor(Instrument):
         self.set_FPar_77_global_float(speed)
         
     def _do_get_ramping_speed_normal_ports(self):
-        '''gets the ramping speed in Volts/seconds for normal ports
+        '''gets the ramping speed in Volts/seconds for safe ports
         '''
         return self.get_FPar_77_global_float()
+        
+    def _do_set_ramping_speed_safe_port_1(self, speed):
+        logging.info(f"{__name__}: setting ramping speed for safe port 1 of process Nr.{self.processnumber} to {speed} V/s")
+        self.set_FPar_72_global_float(speed)
+    
+    def _do_set_ramping_speed_safe_port_2(self, speed):
+        logging.info(f"{__name__}: setting ramping speed for safe port 2 of process Nr.{self.processnumber} to {speed} V/s")
+        self.set_FPar_73_global_float(speed)
+        
+    def _do_set_ramping_speed_safe_port_3(self, speed):
+        logging.info(f"{__name__}: setting ramping speed for safe port 3 of process Nr.{self.processnumber} to {speed} V/s")
+        self.set_FPar_74_global_float(speed)
+        
+    def _do_get_ramping_speed_safe_port_1(self):
+        return self.get_FPar_72_global_float()
+    
+    def _do_get_ramping_speed_safe_port_2(self):
+        return self.get_FPar_73_global_float()
+        
+    def _do_get_ramping_speed_safe_port_3(self):
+        return self.get_FPar_74_global_float()
+
+
           
     def digit_to_volt(self, digit, gate, bit_format=16):
         """function to convert digits in voltage (input can be single value, python list of np.array)
@@ -1313,7 +1354,7 @@ class adwin_semiconductor(Instrument):
         return V_range
 
 
-    def initialize_gates(self, number, reset_to_0:bool=True, lower_limit=0, upper_limit=0, speed=0.2, init_V=None):
+    def initialize_gates(self, number, reset_to_0:bool=True, lower_limit=0, upper_limit=0, speed=0.2, speed_safe_ports=[0.1,0.1,0.1], init_V=None):
         '''This function sets the number of  gates (including current sources)
         and distributes them on the modules starting at module 1 and filling up
         all 8 outputs. Then module 2 etc. is filled up. The modules have to exist.
@@ -1387,6 +1428,10 @@ class adwin_semiconductor(Instrument):
             #set ramping speed. I don't know why self.set_ramping_speed_normal_ports(speed) does not work...
             self._do_set_ramping_speed_normal_ports(speed)
             
+            #set ramping speed. I don't know why self.set_ramping_speed_normal_ports(speed) does not work...
+            self._do_set_ramping_speed_safe_port_1(speed = speed_safe_ports[0])
+            self._do_set_ramping_speed_safe_port_2(speed = speed_safe_ports[1])
+            self._do_set_ramping_speed_safe_port_3(speed = speed_safe_ports[2])
             
             if reset_to_0:
                 #set all outputs to 0 Volts
@@ -2011,7 +2056,7 @@ if __name__ == "__main__":
     bill.initialize_triggered_readout(process_number_triggered=2,
                                       process_path_triggered= adbasic_dir / 'ADCF_Burst_Event_V3.TC2',
                                       process_number_aquisition=3,
-                                      process_path_aquisition= adbasic_dir / 'ADCF_Burst_Event_Stopp_V3.TC3'
+                                      process_path_aquisition= adbasic_dir / 'ADCF_Burst_Event_Stopp_V4.TC3'
                                       )
     bill.start_triggered_readout()
     bill.check_finished_triggered_readout()
