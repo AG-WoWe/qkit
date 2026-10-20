@@ -604,10 +604,13 @@ class ZI_HDAWG4(Instrument):
         exponent = self.daq.getInt('/%s/AWGS/0/TIME' % self._device_id)        
         return 2**exponent
     
-    def _do_get_sampling_rate(self):
+    def _do_get_sampling_rate(self, core = 0):
         logging.info(__name__ +': getting sampling_rate')
         clock = self.daq.getDouble('/%s/system/clocks/sampleclock/freq' % self._device_id)
-        prescaler = 2**self.daq.getInt('/%s/AWGS/0/TIME' % self._device_id)
+        if core == 0:
+            prescaler = 2**self.daq.getInt('/%s/AWGS/0/TIME' % self._device_id)
+        if core == 1:
+            prescaler = 2**self.daq.getInt('/%s/AWGS/1/TIME' % self._device_id)
         return clock/prescaler
         
     def _do_set_output_range(self,new,channel):
@@ -931,7 +934,7 @@ class ZI_HDAWG4(Instrument):
 
         sequencer += '''assignWaveIndex(''' + wave_names + str(0) + '''); \n'''
         sequencer += '''while(true){\nwaitDigTrigger(1);\nplayWave(''' + wave_names[:-2] + ''');\nwaitWave();\n}'''
-        # sequencer += '''while(true){\nplayWave(''' + wave_names[:-2] + ''');\n}'''
+        #sequencer += '''while(true){\nplayWave(''' + wave_names[:-2] + ''');\n}'''
         if self._console_output == True:
             print(sequencer, "\n")
 
