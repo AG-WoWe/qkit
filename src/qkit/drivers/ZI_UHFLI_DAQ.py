@@ -56,7 +56,7 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
             self._device.demods[0].trigger(0) # Set demod0 trigger to continuous    
         else:
             self._device.demods[0].trigger(32) # Set demod0 trigger to high for Trigger Input 3
-            self._daq_module.set('triggernode', '/dev2587/demods/0/sample.TrigIn3') # Set trigger node from DAQ to Trigger Input 3
+        self._daq_module.set('triggernode', '/dev2587/demods/0/sample.TrigIn3') # Set trigger node from DAQ to Trigger Input 3
         self._daq_module.set('edge', 1) # Set trigger to rising
         self._daq_module.set("holdoff/time", 0) # Hold of time before being rearmed
         self._daq_module.set("count", 0) # Number of skipped triggers

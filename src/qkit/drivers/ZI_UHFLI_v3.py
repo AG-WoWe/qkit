@@ -88,7 +88,7 @@ class ZI_UHFLI_v3(Instrument):
         self.add_parameter("filter_timeconst", type=float,
                            flags = self.FLAG_GETSET,
                            channels = (0, 7), channel_prefix="dem%d_",
-                           minval = 102.6e-9, maxval = 76.35,
+                           minval = 2.9900000697580253e-08, maxval = 76.35,
                            units = "s", tags = ["sweep"])
 
         self.add_parameter("demod_enable", type=bool,
@@ -180,7 +180,7 @@ class ZI_UHFLI_v3(Instrument):
         self._device.sigouts[channel].enables[3 + 4*channel](True)
         self._device.sigouts[channel].amplitudes[3 + 4*channel](amplitude)
 
-    def calc_timeconst(self, wait_time, filter_order = 1):
+    def calc_timeconst(self, wait_time, demod_index):
         """
         Calculate the demodulator time constant for a desired record time.
 
@@ -200,10 +200,11 @@ class ZI_UHFLI_v3(Instrument):
         float
             Required filter time constant tau [s].
         """
-        if not 1 <= filter_order <= 8:
-            raise ValueError("filter_order must be between 1 and 8.")
+        if not 0 <= demod_index <= 7:
+            raise ValueError("demodulator index must be between 0 and 7.")
         try:
-            factor = self._filter_settling_factors[self._step_recovery][filter_order - 1]
+            order = int(self._device.demods[demod_index].order())
+            factor = self._filter_settling_factors[self._step_recovery][order-1]
         except KeyError:
             raise ValueError(
                 f"Invalid settling criterion '{settling}'. "
@@ -247,31 +248,27 @@ class ZI_UHFLI_v3(Instrument):
         Returns
         -------
         dict[str, float]
-            Dictionary containing demod data with timestamp converted to seconds.
+            Dictionary containing only time, x, y, phase, and r.
         """
         if not bool(self._device.demods[channel].enable()):
             raise RuntimeError(f"Data transfer of demodulator {channel} is not enabled.")
 
         if wait_settling_time:
             time.sleep(self._settling_time)
+
         raw = self._device.demods[channel].sample()
-        out = {}
 
-        for key, value in raw.items():
-            # Convert numpy arrays to single values
-            if hasattr(value, "__len__"):
-                value = value[-1]
-
-            # Convert timestamp from ticks to seconds
-            if key == "timestamp":
-                value = float(value) * self._device.system.properties.timebase()
-                key = "time"
-                
-            out[key] = float(value)
+        # Extract only the values we want
+        out = {
+            "timestamp": float(raw["timestamp"][-1]) *
+                    self._device.system.properties.timebase(),
+            "x": float(raw["x"][-1]),
+            "y": float(raw["y"][-1]),
+            "phase": float(raw["phase"][-1]),
+        }
 
         # Add magnitude r from x and y
-        if "x" in out and "y" in out:
-            out["r"] = float(np.hypot(out["x"], out["y"]))
+        out["r"] = float(np.hypot(out["x"], out["y"])/self._do_get_output_amplitude(channel)*np.sqrt(2))
 
         return out
 
