@@ -98,6 +98,9 @@ class ZI_HDAWG4(Instrument):
 
         #Turn text output of waveform upload on and off
         self._console_output = True
+        
+        #True: sequencer waits for digital trigger 1 before each playback; False: free-running loop
+        self._use_trigger = True
 
         #set apilevel to highest supported by device to unlock most of the functionalities
         #create apisession to communicate with device (ziDataServer needed)
@@ -137,6 +140,7 @@ class ZI_HDAWG4(Instrument):
         self.add_function('upload_to_device')
         self.add_function('load_config_file')
         self.add_function('disable_everything')
+        self.add_function('set_trigger')
 
         #/TRIGGERS/OUT/n/SOURCE
         self.add_parameter('marker_output', type = int,
@@ -683,6 +687,17 @@ class ZI_HDAWG4(Instrument):
     def disable_everything(self):
         zhinst.utils.disable_everything(self.daq, self.device)
         logging.info(__name__+': all outputs etc. disabled')
+        
+    def set_trigger(self, enabled=True):
+        """
+        Switch the digital trigger wait in the sequencer program on or off.
+        Takes effect the next time upload_waveform() is called.
+
+        enabled (BOOL): True  -> waitDigTrigger(1) before each playWave (default)
+                        False -> free-running loop without trigger
+        """
+        self._use_trigger = bool(enabled)
+        logging.info(__name__ + ': trigger %s' % ('enabled' if self._use_trigger else 'disabled'))
 
     #create backup of folder "waves/" and empty it
     def refresh_folder(self):
@@ -933,8 +948,11 @@ class ZI_HDAWG4(Instrument):
             raise Exception("No waveform provided")
 
         sequencer += '''assignWaveIndex(''' + wave_names + str(0) + '''); \n'''
-        sequencer += '''while(true){\nwaitDigTrigger(1);\nplayWave(''' + wave_names[:-2] + ''');\nwaitWave();\n}'''
-        #sequencer += '''while(true){\nplayWave(''' + wave_names[:-2] + ''');\n}'''
+        if self._use_trigger:
+            sequencer += '''while(true){\nwaitDigTrigger(1);\nplayWave(''' + wave_names[:-2] + ''');\nwaitWave();\n}'''
+        else:
+            sequencer += '''while(true){\nplayWave(''' + wave_names[:-2] + ''');\n}'''
+        
         if self._console_output == True:
             print(sequencer, "\n")
 

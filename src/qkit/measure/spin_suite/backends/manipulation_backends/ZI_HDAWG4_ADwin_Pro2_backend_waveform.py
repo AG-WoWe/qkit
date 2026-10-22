@@ -23,35 +23,35 @@ class ZI_HDAWG4_ADwin_Pro2_backend_waveform(MA_backend_base):
         self.bill = ADwinPro2
         
     def Ch1_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 0)*1e-9
         return rate
     
     def Ch2_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 0)*1e-9
         return rate
     
     def Ch3_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 1)*1e-9
         return rate
     
     def Ch4_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 1)*1e-9
         return rate
     
     def Trig1_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 0)*1e-9
         return rate
 
     def Trig2_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 0)*1e-9
         return rate
 
     def Trig3_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 1)*1e-9
         return rate
 
     def Trig4_get_sample_rate(self):
-        rate = self.hartwig.get_sampling_rate()*1e-9
+        rate = self.hartwig.get_sampling_rate(core = 1)*1e-9
         return rate
 
     def run(self):
