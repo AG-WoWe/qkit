@@ -141,9 +141,9 @@ class adwin_semiconductor(Instrument):
                  processnumber_main=1,
                  processpath_main = str(adbasic_dir / 'ramp_input_V3.TC1'),
                  process_number_triggered=2,
-                 process_path_triggered = str(adbasic_dir / 'ADCF_Burst_Event_V3.TC2'),
+                 process_path_triggered = str(adbasic_dir / 'ADCF_Burst_Event_V4.TC2'),
                  process_number_aquisition=3,
-                 process_path_aquisition = str(adbasic_dir / 'ADCF_Burst_Event_Stopp_V4.TC3'),
+                 process_path_aquisition = str(adbasic_dir / 'ADCF_Burst_Event_Stopp_V5.TC3'),
                  process_number_continuous=4,
                  watch_sampling_f="10kHz",
                  process_path_continuous_2kHz = str(adbasic_dir / 'ADCF_continuous_2kHz_V3.TC4'),
@@ -1896,7 +1896,7 @@ class adwin_semiconductor(Instrument):
         self.initialize_triggered_readout beforehand.
         """
         logging.info(__name__ + ': starting measurement')
-        self.set_Par_16_global_long(0) # resetting flag of check_finished_one_average_triggered_readout
+        self.set_Par_16_global_long(0) # resetting flag of check_finished_one_average_triggered_readout # not needed, will be resetted by adwin
         self.set_Par_18_global_long(1)
 
     def check_finished_one_average_triggered_readout(self):
@@ -1905,7 +1905,14 @@ class adwin_semiconductor(Instrument):
         Ideally there should be no more triggers sent by the AWG afterwards until the ADwin triggers the AWG again.
         """
         logging.info(__name__ + ': checking if data is ready.')
-        status = self.get_Par_16_global_long()
+        status18 = self.get_Par_18_global_long()    # add check for measurement_flag to ensure we only readout after a new measurement is performed
+        status16 = self.get_Par_16_global_long()
+        status = bool(status16) and not bool(status18)
+        # ''' Explanation: The read_triggered_readout function does set the measurement_flag (Par_18) to 1 after the readout, to start the next measurement.
+        #     In the Adbasic script when a new measurement is started first Par_16 is set to 0, then Par_18 to 0.
+        #     This and the order in which we check the status of our flags ensures, that "status" is only true,
+        #     when data of the next measurement is ready for readout by PC
+        # '''
         return status
 
     def check_error_triggered_readout(self):
@@ -1939,7 +1946,7 @@ class adwin_semiconductor(Instrument):
         data_raw = np.array(self.adw.GetData_Long(1, 1, size))
         if self.triggered_readout_sleep != 0:
             time.sleep(self.triggered_readout_sleep) # this minor sleep is important to have no trigger loss between AWG and ADwin
-        self.start_triggered_readout()  # starting new average
+        self.start_triggered_readout()  # starting new measurement
         data_reshaped = data_raw.reshape(self.measurement_count, sample_count_averaging)
         data_volts = data_reshaped * 2*10/(2**16) - 10 # translating to volts
 

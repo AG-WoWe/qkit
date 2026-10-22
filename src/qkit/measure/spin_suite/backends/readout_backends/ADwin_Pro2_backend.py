@@ -63,6 +63,8 @@ class ADwin_Pro2_backend(RO_backend_base):
         if self.ADwinPro2.check_error_triggered_readout():
                 logging.error(__name__ + ': error flag thrown by ADwin.')
                 raise ADwinErrorFlag("Error flag was thrown by ADwin. See ADBasic process.")
+        elif self.finished():
+            logging.info("Finished measurement!")
         elif self.finished_single_average():
             data["input1"] = {}
             data["input1"]["amplitude"] = self.ADwinPro2.read_triggered_readout()
