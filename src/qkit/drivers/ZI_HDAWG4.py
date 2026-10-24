@@ -678,10 +678,12 @@ class ZI_HDAWG4(Instrument):
     #start awg sequencer
     def start_playback(self):
         self.daq.setInt(f"/{self.device}/awgs/0/enable", 1)
+        self.daq.setInt(f"/{self.device}/awgs/1/enable", 1)
 
     #start awg sequencer
     def stop_playback(self):
         self.daq.setInt(f"/{self.device}/awgs/0/enable", 0)
+        self.daq.setInt(f"/{self.device}/awgs/1/enable", 0)
 
     #disable everything
     def disable_everything(self):
@@ -819,6 +821,11 @@ class ZI_HDAWG4(Instrument):
 
    # upload waveform from array
     def upload_waveform(self, awg_core, wave_dict):
+        # A marker (TrigN) cannot be uploaded without a wave on the same channel: add a zero wave
+        for k in ("1", "2"):
+           if f"Trig{k}" in wave_dict and f"Ch{k}" not in wave_dict:
+              wave_dict[f"Ch{k}"] = np.zeros(len(wave_dict[f"Trig{k}"]))
+        
         # Align wave_dict to 16 samples and adjust output voltage
         for channel in wave_dict.keys():
             # Set the output range for each channel
