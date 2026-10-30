@@ -10,6 +10,7 @@ import qkit.drivers.ZI_UHFLI_v3 as parent
 
 import numpy as np
 import logging
+import time
 
 log = logging.getLogger(__name__)
 
@@ -23,11 +24,29 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
         grid/cols = sample_count       (samples per window)
         count     = averages           (number of grids = repetitions of the sequence)
     read() returns arrays of shape (n_new_grids, rows, cols).
+
+    Readout modes (set_readout_mode, applied at the next arm()):
+        "gated"      (default) demod0 sends samples only while the trigger input is high
+        "continuous" demod0 streams all samples
+        "edge"       demod0 sends ONE sample per rising edge -> only useful with sample_count = 1
+    In every mode the DAQ module starts a window on the rising edge of TrigIn3.
     """
 
     # LabOne DAQ module trigger type. 6 = hardware trigger (uses triggernode).
     # UNVERIFIED: check against the LabOne DAQ module documentation for your version.
     TRIGGER_TYPE = 6
+
+    # demods/0/trigger value per readout mode.
+    # UNVERIFIED: check in the node documentation which trigger input each value refers to.
+    # Gate/edge must use the same physical input as the DAQ triggernode (sample.TrigIn3).
+    DEMOD_TRIGGER = {
+        "continuous": 0,
+        "gated": 32,
+        "edge": 1,
+    }
+
+    # UNVERIFIED meaning of the header flag bits, so filtering is off by default.
+    USE_FLAGS = False
 
     def __init__(self, name, device_id):
 
@@ -38,11 +57,15 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
         # ======================================================
         self._daq_module = self._session.daq_server.dataAcquisitionModule()
         self._daq_module.set("device", self._device_id)
+        self._readout_mode = "gated"
 
         # ======================================================
         # QKIT FUNCTIONS
         # ======================================================
         self.add_function("setup_triggered_readout")
+        self.add_function("set_continuous_readout")
+        self.add_function("set_readout_mode")
+        self.add_function("get_readout_mode")
         self.add_function("sub_dem0")
 
         self.add_function("set_daq_measurement_count")
@@ -55,6 +78,18 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
         self.add_function("stop")
 
     # ==========================================================
+    # READOUT MODE
+    # ==========================================================
+    def set_readout_mode(self, mode):
+        """'gated' (default), 'continuous' or 'edge'. Takes effect at the next arm()."""
+        if mode not in self.DEMOD_TRIGGER:
+            raise ValueError(f"mode must be one of {list(self.DEMOD_TRIGGER)}")
+        self._readout_mode = mode
+
+    def get_readout_mode(self):
+        return self._readout_mode
+
+    # ==========================================================
     # DAQ CONFIGURATION
     # ==========================================================
     def setup_triggered_readout(self, debug=False):
@@ -62,12 +97,12 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
         Configure the DAQ module for triggered, grid-based acquisition.
         Does NOT touch grid/rows, grid/cols, count or holdoff/time: those are set by
         set_daq_measurement_count / set_daq_sample_count / set_daq_grid.
+        debug=True is kept for compatibility and is the same as set_readout_mode('continuous').
         """
-        self._daq_module.set("type", self.TRIGGER_TYPE)
         if debug:
-            self._device.demods[0].trigger(0)   # demod0 transfers continuously
-        else:
-            self._device.demods[0].trigger(32)  # demod0 data transfer gated by Trigger Input 3
+            self._readout_mode = "continuous"
+        self._daq_module.set("type", self.TRIGGER_TYPE)
+        self._device.demods[0].trigger(0)   # continuous while arming; the mode is applied in arm()
         self._daq_module.set("triggernode", f"/{self._device_id}/demods/0/sample.TrigIn3")
         self._daq_module.set("edge", 1)             # rising
         self._daq_module.set("holdoff/count", 0)    # number of skipped triggers
@@ -76,6 +111,10 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
         self._daq_module.set("grid/mode", 4)        # exact, no interpolation (UNVERIFIED)
         self._daq_module.set("grid/direction", 0)   # forward
         self._daq_module.set("grid/repetitions", 1) # no internal averaging, one grid = one average
+
+    def set_continuous_readout(self):
+        """Counterpart to setup_triggered_readout: demod0 transfers data continuously again."""
+        self._device.demods[0].trigger(0)
 
     # ==========================================================
     # SUBSCRIPTIONS
@@ -110,6 +149,12 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
     # ==========================================================
     def arm(self):
         self._daq_module.execute()
+        # Let the DAQ module see continuous samples with the trigger low before the first edge;
+        # otherwise the first rising edge is missed in gated mode and all rows shift by one.
+        time.sleep(0.2)
+        value = self.DEMOD_TRIGGER[self._readout_mode]
+        if value:
+            self._device.demods[0].trigger(value)
 
     def finished(self):
         """Non-blocking. True if the DAQ module has acquired all requested grids."""
@@ -120,9 +165,6 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
         self._daq_module.finish()
         self._daq_module.read(True)
         self._daq_module.unsubscribe("*")
-
-    # UNVERIFIED meaning of the header flag bits, so filtering is off by default.
-    USE_FLAGS = False
 
     @classmethod
     def _chunk_complete(cls, chunk):
@@ -136,9 +178,9 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
 
     def read(self, signals=("x", "y", "r", "theta", "timestamp")):
         """
-        Return all grids completed since the last call (only the requested signals):
+        Return all grids since the last call (only the requested signals):
         {"demod0": {"x"|"y"|"r"|"theta"|"timestamp": array(n, rows, cols)}}
-        or {} if there is no new complete grid.
+        or {} if there is no new data. Grids may still be filling; the backend filters those.
         """
         data = self._daq_module.read(True)
         timebase = float(self._device.system.properties.timebase())

@@ -16,7 +16,7 @@ import numpy as np
 from qkit.measure.spin_suite.backends.manipulation_backends.MA_backend_base import MA_backend_base
 
 
-class ZI_HDAWG4_backend(MA_backend_base):
+class ZI_HDAWG4_double_backend(MA_backend_base):
     def __init__(self, hartwig, ludwig):
         self.hartwig = hartwig
         self.ludwig = ludwig

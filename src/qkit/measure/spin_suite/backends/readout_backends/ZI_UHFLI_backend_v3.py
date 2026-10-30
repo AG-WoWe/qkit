@@ -6,25 +6,32 @@ Created on Mo Jan  26 10:21:24 2026
 @author: lr1740
 """
 import time
+import numpy as np
 
 from qkit.measure.spin_suite.backends.readout_backends.RO_backend_base import RO_backend_base
 
 
 class ZI_UHFLI_backend_v3(RO_backend_base):
 
-    def __init__(self, UHFLI, read_timeout=0.5, nodes=("r",)):
+    def __init__(self, UHFLI, read_timeout=0.5, nodes=("r",), readout_mode="gated"):
         """
         Parameters
         ----------
         UHFLI :
             Instance of ZI_UHFLI_DAQ.
         read_timeout : float
-            Maximum time (s) read() waits for new data before returning {}.
+            Kept for compatibility; read() no longer waits for data.
         nodes : sequence of str
             Which values are transferred and saved: any of "x", "y", "r", "theta", "timestamp".
+            Note: a single node needs a trailing comma, e.g. ("r",).
+        readout_mode : str
+            "gated" (default), "continuous" or "edge" (see ZI_UHFLI_DAQ.set_readout_mode).
+            "edge" delivers one sample per trigger and only works with a sample count of 1.
         """
         super().__init__()
 
+        if isinstance(nodes, str):
+            nodes = (nodes,)
         nodes = list(nodes)
         if not nodes or any(n not in ("x", "y", "r", "theta", "timestamp") for n in nodes):
             raise ValueError("nodes must be a non-empty subset of x, y, r, theta, timestamp")
@@ -39,8 +46,20 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
         self._averages = 1
         self._received = 0
 
+        self.set_readout_mode(readout_mode)
+
         # Register measurements: these nodes define the datasets in the file
         self.register_measurement("demod0", "V", self._nodes)
+
+    # ------------------------------------------------------------------
+    # Readout mode
+    # ------------------------------------------------------------------
+    def set_readout_mode(self, mode):
+        """'gated', 'continuous' or 'edge'. Takes effect at the next measurement."""
+        self.UHFLI.set_readout_mode(mode)
+
+    def get_readout_mode(self):
+        return self.UHFLI.get_readout_mode()
 
     # ------------------------------------------------------------------
     # Sample rate (spin_excite only READS it; set it before creating Exciting)
@@ -88,7 +107,7 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
         self._received = 0
         self.UHFLI.setup_triggered_readout()
         self.UHFLI.sub_dem0(self._nodes)   # subscribe only what is saved, before execute
-        self.UHFLI.arm()
+        self.UHFLI.arm()                   # applies the readout mode after the DAQ module is running
 
     def finished(self):
         # Non-blocking; True once all averages have been handed out by read().
@@ -96,27 +115,40 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
 
     def read(self):
         """
-        Returns only data captured since the last call:
+        Returns only grids completed since the last call:
         {"demod0": {node: array(n_new, measurement_count, sample_count)}}
-        Waits up to read_timeout for data, then returns {}.
+        Returns {} if no new complete grid is available yet.
         """
-        deadline = time.time() + self._read_timeout
-        while True:
-            data = self.UHFLI.read(self._nodes)
-            if data or time.time() > deadline:
-                break
-            time.sleep(1e-2)
+        data = self.UHFLI.read(self._nodes)
         if not data:
+            time.sleep(1e-2)
             return {}
 
-        # Never hand out more averages than requested
+        # Pass on only grids in which every measurement window (row) has been recorded.
+        # The DAQ module also hands out the grid that is still filling; it comes again once complete.
+        first = next(n for n in self._nodes if n != "timestamp")
+        arr = data["demod0"][first]                                  # (n_grids, rows, cols)
+        complete = ~np.all(np.isnan(arr), axis=2).any(axis=1)
+        if not complete.any():
+            return {}
+        for node in data["demod0"]:
+            data["demod0"][node] = data["demod0"][node][complete]
+
         remaining = self._averages - self._received
         for node, arr in data["demod0"].items():
             data["demod0"][node] = arr[:remaining]
         self._received += len(next(iter(data["demod0"].values())))
+
+        # normalise like sample_dem: r / output amplitude * sqrt(2)
+        if "r" in data["demod0"]:
+            amp = self.UHFLI._do_get_output_amplitude(0)
+            data["demod0"]["r"] = data["demod0"]["r"] / amp * np.sqrt(2)
+
         return data
 
     def stop(self):
         # Called before every arm and at the end of a measurement; safe to repeat.
+        # arm() re-applies the readout mode, so resetting to continuous here is harmless.
         self.UHFLI.stop()
+        self.UHFLI.set_continuous_readout()
         self._received = 0
