@@ -589,19 +589,25 @@ class ZI_HDAWG4(Instrument):
         logging.info(__name__+ ': Getting sample clock.')
         return self.daq.getDouble('/%s/system/clocks/sampleclock/freq' % self._device_id)
     
-    def _do_set_sampling_prescaler(self, newdiv, core):
+    def _do_set_sampling_prescaler(self, newdiv, core=None):
+        """
+        Set the sampling rate divider 2^n (n = 0...13) of an AWG core.
+        core: 0 or 1 for a single core; None (default) sets both cores to the same value.
+        """
         if newdiv not in self._prescaler:
-            raise ValueError(__name__ + " Could not set sampling prescaler, must be 2^n, with n between 0 and 13")            
-        logging.info(__name__ +': Setting sampling prescaler to %d' % newdiv)
-        exponent = np.floor(np.log2(np.abs(newdiv))).astype(int)
-        if core == 0:
-            self.daq.setInt('/%s/AWGS/0/TIME' % self._device_id, exponent)
-        elif core == 1:
-            self.daq.setInt('/%s/AWGS/1/TIME' % self._device_id, exponent)
-        else: 
-            raise ValueError("The core must be set to either 0 or 1. Value out of range.")
+            raise ValueError(__name__ + " Could not set sampling prescaler, must be 2^n, with n between 0 and 13")
+        if core is None:
+            cores = (0, 1)
+        elif core in (0, 1):
+            cores = (core,)
+        else:
+            raise ValueError("The core must be 0, 1 or None (both). Value out of range.")
 
-        self.daq.sync()
+        exponent = int(np.log2(newdiv))
+        for c in cores:
+            logging.info(__name__ + ': Setting sampling prescaler of core %d to %d' % (c, newdiv))
+            self.daq.setInt('/%s/AWGS/%d/TIME' % (self._device_id, c), exponent)
+        self.daq.sync()     # make sure the new rate is applied before anything reads it back
 
     def _do_get_sampling_prescaler(self):
         logging.info(__name__ +': getting sampling_prescaler')

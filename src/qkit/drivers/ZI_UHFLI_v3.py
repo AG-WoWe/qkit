@@ -133,6 +133,7 @@ class ZI_UHFLI_v3(Instrument):
         self.add_function("set_output_amplitude")
         self.add_function("calc_timeconst")
         self.add_function("calc_settling_time")
+        self.add_function("set_filter_settling")
         self.add_function("set_sampling_rate")
         self.add_function("sample_dem")
 
@@ -207,7 +208,7 @@ class ZI_UHFLI_v3(Instrument):
             factor = self._filter_settling_factors[self._step_recovery][order-1]
         except KeyError:
             raise ValueError(
-                f"Invalid settling criterion '{settling}'. "
+                f"Invalid settling criterion '{self._step_recovery}'. "
                 f"Choose from {list(self._filter_settling_factors.keys())}."
             )
 
@@ -232,7 +233,7 @@ class ZI_UHFLI_v3(Instrument):
                 f"maximum network transfer rate ({self._max_sampling_rate:.3e} Hz). "
                 f"Using the maximum instead."
             )
-        newrate = self._max_sampling_rate
+            newrate = self._max_sampling_rate
         self._device.demods[demod].rate(newrate)
     
     def calc_settling_time(self, demod_index):
@@ -240,7 +241,34 @@ class ZI_UHFLI_v3(Instrument):
         tc = float(self._device.demods[demod_index].timeconstant())
         order = int(self._device.demods[demod_index].order())
         self._settling_time = tc * self._filter_settling_factors[step_recovery][order - 1]
-        
+      
+    def set_filter_settling(self, demod, settling_time, step_recovery=None, order=None):
+        """
+        Set the demodulator filter so that a step settles within settling_time.
+
+        demod : int
+            Demodulator index (0...7).
+        settling_time : float
+            Time within which a step reaches the step recovery level [s].
+        step_recovery : str, optional
+            "0.632", "0.9", "0.99" or "0.999". Keeps the current value if None.
+        order : int, optional
+            Filter order 1...8. Keeps the current order if None.
+
+        Returns the time constant actually set by the device [s].
+        """
+        if step_recovery is not None:
+            self._do_set_step_recovery(step_recovery)
+        if order is not None:
+            self._device.demods[demod].order(order)          # before calc_timeconst: it reads the order
+        tc = self.calc_timeconst(settling_time, demod)
+        self._device.demods[demod].timeconstant(tc)          # the device rounds to an allowed value
+        self.calc_settling_time(demod)                       # from the actual time constant
+        tc_set = float(self._device.demods[demod].timeconstant())
+        logger.info(f"{__name__}: demod {demod}: tc {tc_set*1e6:.2f} us, "
+                    f"settling ({self._step_recovery}) {self._settling_time*1e6:.2f} us")
+        return tc_set
+      
     def sample_dem(self, channel, wait_settling_time = True):
         """
         Take one demodulator sample.

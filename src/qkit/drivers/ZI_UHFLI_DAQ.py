@@ -151,7 +151,7 @@ class ZI_UHFLI_DAQ(parent.ZI_UHFLI_v3):
         self._daq_module.execute()
         # Let the DAQ module see continuous samples with the trigger low before the first edge;
         # otherwise the first rising edge is missed in gated mode and all rows shift by one.
-        time.sleep(0.2)
+        #time.sleep(0.5)
         value = self.DEMOD_TRIGGER[self._readout_mode]
         if value:
             self._device.demods[0].trigger(value)
