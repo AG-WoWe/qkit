@@ -59,8 +59,13 @@ class ZI_HDAWG4_v2(Instrument):
             channel_output (INT)
             amplitude (FLOAT)
             modulation_mode (INT)
-            voltage_limit (FLOAT)
+            voltage_limit (FLOAT)          same limit for all outputs (get: strictest)
+            channel_voltage_limit (FLOAT)  limit of a single output (set_chX_channel_voltage_limit)
             console_output (BOOL)
+
+        voltage safety: waveform peak + |DC offset| <= voltage limit of the output, checked by
+        check_voltage(output, v_peak) in every upload path; the output range is never set above
+        max_output_range(output).
             auto_range (BOOL)
             max_samples (INT)
 
@@ -90,8 +95,10 @@ class ZI_HDAWG4_v2(Instrument):
         #Possible voltage ranges for outputs
         self._Vrange_array = np.array([0.2, 0.4, 0.6, 0.8, 1., 2., 3., 4., 5.])
 
-        #Limiter for output range
-        self._max_Vrange = 5 # in V
+        #Voltage limit per output (V at the AWG output): waveform peak + |DC offset| must stay below it.
+        #All upload paths (upload_waveform, backends) check against it with check_voltage(); the output
+        #range is never set above max_output_range() of the output.
+        self._voltage_limits = {1: 5.0, 2: 5.0, 3: 5.0, 4: 5.0}
 
         #Turn text output of waveform upload on and off
         self._console_output = True
@@ -154,6 +161,8 @@ class ZI_HDAWG4_v2(Instrument):
         self.add_function('load_config_file')
         self.add_function('disable_everything')
         self.add_function('set_trigger')
+        self.add_function('check_voltage')
+        self.add_function('max_output_range')
 
         #/TRIGGERS/OUT/n/SOURCE
         self.add_parameter('marker_output', type = int,
@@ -240,11 +249,18 @@ class ZI_HDAWG4_v2(Instrument):
             minval = 0, maxval = 5,
             tags = ['sweep'])
 
-        #Actual voltage limit
+        #Voltage limit of all outputs (set: same value for all four, get: the strictest one)
         self.add_parameter('voltage_limit', type = float,
             flags = Instrument.FLAG_GETSET,
             minval = 0, maxval = 5,
-            tags = ['sweep'])
+            units = 'V', tags = ['sweep'])
+
+        #Voltage limit of a single output
+        self.add_parameter('channel_voltage_limit', type = float,
+            flags = Instrument.FLAG_GETSET,
+            channels = (1,4), channel_prefix = "ch%d_",
+            minval = 0, maxval = 5,
+            units = 'V')
 
         # Add console_output
         self.add_parameter('console_output', type = bool,
@@ -609,6 +625,9 @@ class ZI_HDAWG4_v2(Instrument):
             new = self._Vrange_array[idx]
             logging.warning('Output range must be equal to one of the following values (in V): '
                             '0.2 / 0.4 / 0.6 / 0.8 / 1 / 2 / 3 / 4 / 5. Setting output range to ' + str(new) + ' V')
+        if new > self.max_output_range(channel) + 1e-9:
+            raise ValueError(f"Output {channel}: range {new} V is above the allowed maximum "
+                             f"{self.max_output_range(channel)} V (voltage limit {self._voltage_limits[channel]} V)")
         logging.info(__name__+': setting output range of channel %d to %s V.' % (channel, str(new)))
         self.daq.setDouble('/%s/SIGOUTS/%d/RANGE' % (self._device_id, channel-1), float(new))
         self.daq.sync()
@@ -630,6 +649,9 @@ class ZI_HDAWG4_v2(Instrument):
         """
         if speed <= 0 or voltage_step <= 0:
             raise ValueError("speed and voltage_step must be larger than 0")
+        if abs(new) > self._voltage_limits[channel]:
+            raise ValueError(f"Output {channel}: offset {new} V exceeds the voltage limit of "
+                             f"{self._voltage_limits[channel]} V")
 
         node = '/%s/sigouts/%d/offset'% (self.device, channel-1)
         init_voltage = self.daq.getDouble(node)
@@ -652,15 +674,58 @@ class ZI_HDAWG4_v2(Instrument):
 
     def _do_set_voltage_limit(self, maxV):
         """
-        Limit the output range that upload_waveform is allowed to select (in V, 0.2 to 5).
+        Same voltage limit (V at the AWG output) for all four outputs:
+        waveform peak + |DC offset| must stay below maxV. Use set_chX_channel_voltage_limit for single outputs.
         """
-        if not (self._Vrange_array[0] <= maxV <= self._Vrange_array[-1]):
-            raise ValueError("voltage_limit must be between %s and %s V" % (self._Vrange_array[0], self._Vrange_array[-1]))
-        self._max_Vrange = maxV
-        logging.info(__name__+': output range is limited to %s V' % str(maxV))
+        if not (0 < maxV <= 5):
+            raise ValueError("voltage_limit must be between 0 and 5 V")
+        for ch in self._voltage_limits:
+            self._voltage_limits[ch] = float(maxV)
+        logging.info(__name__ + ': voltage limit of all outputs set to %s V' % str(maxV))
 
     def _do_get_voltage_limit(self):
-        return self._max_Vrange
+        return min(self._voltage_limits.values())        # the strictest one
+
+    def _do_set_channel_voltage_limit(self, maxV, channel):
+        """voltage limit (V at the AWG output) of output 'X': waveform peak + |DC offset| <= maxV"""
+        if not (0 < maxV <= 5):
+            raise ValueError("voltage limit must be between 0 and 5 V")
+        self._voltage_limits[channel] = float(maxV)
+        logging.info(__name__ + ': voltage limit of output %d set to %s V' % (channel, str(maxV)))
+
+    def _do_get_channel_voltage_limit(self, channel):
+        return self._voltage_limits[channel]
+
+    def max_output_range(self, output):
+        """
+        Largest output range (V) allowed on output 1..4: the smallest range that still covers its voltage limit.
+        upload_waveform, set_chX_output_range and the backends never select a range above this value.
+        """
+        lim = self._voltage_limits[output]
+        idx = min(int(np.searchsorted(self._Vrange_array, lim - 1e-9)), len(self._Vrange_array) - 1)
+        return float(self._Vrange_array[idx])
+
+    def check_voltage(self, output, v_peak, offset=None):
+        """
+        Raise if |v_peak| + |DC offset| of output 1..4 exceeds its voltage limit.
+        All upload paths (upload_waveform, backends) call this before anything is played.
+
+        output (INT): physical output 1..4
+        v_peak (FLOAT): largest |voltage| of the waveform at the AWG output (V)
+        offset (FLOAT): DC offset to assume (V); None = read the current offset of the output
+
+        return value (FLOAT): |v_peak| + |offset|
+        """
+        if output not in self._voltage_limits:
+            raise ValueError("output must be 1, 2, 3 or 4")
+        if offset is None:
+            offset = self.daq.getDouble('/%s/sigouts/%d/offset' % (self._device_id, output - 1))
+        lim = self._voltage_limits[output]
+        total = abs(v_peak) + abs(offset)
+        if total > lim * (1 + 1e-9):
+            raise ValueError(f"Output {output}: {abs(v_peak):.4g} V peak + {abs(offset):.4g} V offset = "
+                             f"{total:.4g} V exceeds the voltage limit of {lim} V")
+        return total
 
     def _do_set_console_output(self, output_bool):
         self._console_output = bool(output_bool)
@@ -907,9 +972,7 @@ class ZI_HDAWG4_v2(Instrument):
             wave = data[f"Ch{k}"]
             output = int(k) + 2 * awg_core                      # physical output 1..4
             maxV = float(np.max(np.abs(wave)))
-            if maxV > self._max_Vrange:
-                raise Exception(f"Output {output}: waveform peak {maxV:.4g} V exceeds the voltage limit "
-                                f"of {self._max_Vrange} V")
+            self.check_voltage(output, maxV)                     # peak + DC offset against the limit
 
             # DC content charges the bias tee
             if self._dc_warning is not None and maxV > 0:
@@ -927,6 +990,7 @@ class ZI_HDAWG4_v2(Instrument):
             if self._auto_range and not direct:
                 idx = min(int(np.searchsorted(self._Vrange_array, maxV, side='left')), len(self._Vrange_array) - 1)
                 new = float(self._Vrange_array[idx])
+                new = min(new, self.max_output_range(output))    # never above the range of the voltage limit
                 if not np.isclose(new, current):                  # only switch the range when it changes
                     if self._console_output:
                         print(f"Setting ch{output} output range to {new} V to match waveform data.")
