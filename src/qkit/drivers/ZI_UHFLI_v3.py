@@ -29,8 +29,7 @@ class ZI_UHFLI_v3(Instrument):
         self._session = Session(host)
         self._device = self._session.connect_device(device_id)
 
-        #logging.info(f"{__name__}: Connected to {device_id}")
-        logger.info(f"{__name__}: Connected to {device_id}")
+        logger.info(f"Connected to {device_id}")
         
         # Add software parameters for convenience
         # ================= PARAMETERS =================
@@ -43,7 +42,9 @@ class ZI_UHFLI_v3(Instrument):
             }
                            
         self._bw_factors = [0.2500, 0.1250, 0.0937, 0.0781, 0.0684, 0.0615, 0.0564, 0.0524]
-        self._max_sampling_rate = 1.758 * 1e6 # This is not a device but network limit. Check if data is lost when using higher transfer rates.
+        # Upper limit for set_sampling_rate() (gated readout); the 100 kHz limit for continuous
+        # streaming lives in ZI_UHFLI_DAQ (MAX_CONTINUOUS_RATE).
+        self._max_sampling_rate = 1.758 * 1e6
         self._step_recovery = step_recovery
         self._settling_time = settling_time
 
@@ -183,18 +184,17 @@ class ZI_UHFLI_v3(Instrument):
 
     def calc_timeconst(self, wait_time, demod_index):
         """
-        Calculate the demodulator time constant for a desired record time.
+        Calculate the demodulator time constant for a desired settling time.
+
+        Uses the current filter order of the demodulator and the step recovery
+        criterion (set_step_recovery: "0.632", "0.9", "0.99" or "0.999").
 
         Parameters
         ----------
         wait_time : float
-            Time available befor one measurement point [s].
-
-        filter_order : int
-            Demodulator filter order (1...8).
-
-        settling : str
-            Settling criterion: "0.632", "0.9", "0.99", or "0.999".
+            Time within which a step should settle to the step recovery level [s].
+        demod_index : int
+            Demodulator index (0...7).
 
         Returns
         -------
@@ -265,19 +265,30 @@ class ZI_UHFLI_v3(Instrument):
         self._device.demods[demod].timeconstant(tc)          # the device rounds to an allowed value
         self.calc_settling_time(demod)                       # from the actual time constant
         tc_set = float(self._device.demods[demod].timeconstant())
-        logger.info(f"{__name__}: demod {demod}: tc {tc_set*1e6:.2f} us, "
+        logger.info(f"demod {demod}: tc {tc_set*1e6:.2f} us, "
                     f"settling ({self._step_recovery}) {self._settling_time*1e6:.2f} us")
         return tc_set
       
-    def sample_dem(self, channel, wait_settling_time = True):
+    def sample_dem(self, channel, wait_settling_time = True, output = 0):
         """
         Take one demodulator sample.
+
+        Parameters
+        ----------
+        channel : int
+            Demodulator index (0...7).
+        wait_settling_time : bool
+            Wait the filter settling time before sampling.
+        output : int
+            Signal output (0 or 1) whose amplitude r is normalised to. Default 0.
 
         Returns
         -------
         dict[str, float]
             Dictionary containing only time, x, y, phase, and r.
         """
+        if output not in (0, 1):
+            raise ValueError(f"Invalid output channel {output}")
         if not bool(self._device.demods[channel].enable()):
             raise RuntimeError(f"Data transfer of demodulator {channel} is not enabled.")
 
@@ -296,132 +307,122 @@ class ZI_UHFLI_v3(Instrument):
         }
 
         # Add magnitude r from x and y
-        out["r"] = float(np.hypot(out["x"], out["y"])/self._do_get_output_amplitude(channel)*np.sqrt(2))
+        out["r"] = float(np.hypot(out["x"], out["y"]) / self._do_get_output_amplitude(output) * np.sqrt(2))
 
         return out
 
     # ================= INPUT =================
     def _do_set_input_range(self, newrange, channel):
-        logging.debug("%s: setting input range on channel %d to %.3g V",__name__, channel, newrange)
+        logger.debug("setting input range on channel %d to %.3g V", channel, newrange)
         self._device.sigins[channel].range(newrange)
 
     def _do_get_input_range(self, channel):
-        logging.debug(__name__ + ' : getting range on input channel %s' % channel)
+        logger.debug("getting range on input channel %s", channel)
         return float(self._device.sigins[channel].range())
     
     def _do_set_input_scaling(self, newscale, channel):
-        logging.debug(__name__ + ' : setting input scaling on channel %d to %.3g"', channel, newscale)
+        logger.debug("setting input scaling on channel %d to %.3g", channel, newscale)
         self._device.sigins[channel].scaling(newscale)
     
     def _do_get_input_scaling(self, channel):
-        logging.debug(__name__ + ' : getting scaling on input channel %s' % channel)
+        logger.debug("getting scaling on input channel %s", channel)
         return round(float(self._device.sigins[channel].scaling()), 3)
     
     def _do_set_input_50ohm(self, onoff, channel):
         mode = "50ohm" if onoff else "1Mohm"
-        logging.debug(__name__ + ' : setting impedance on input channel %d to %s', channel, mode)
+        logger.debug("setting impedance on input channel %d to %s", channel, mode)
         self._device.sigins[channel].imp50(int(bool(onoff)))
 
     def _do_get_input_50ohm(self, channel):
-        logging.debug(__name__ + ' : getting the impedance of input channel %s' % channel)
+        logger.debug("getting the impedance of input channel %s", channel)
         return bool(self._device.sigins[channel].imp50())
     
     def _do_set_input_autorange(self, onoff, channel):
         state = "ON" if onoff else "OFF"
-        logging.debug(__name__ + " : setting input autorange on channel %d to %s", channel, state)
+        logger.debug("setting input autorange on channel %d to %s", channel, state)
         self._device.sigins[channel].autorange(int(bool(onoff)))
 
     def _do_get_input_autorange(self, channel):
-        logging.debug("%s: getting input autorange state on channel %d",__name__, channel)
+        logger.debug("getting input autorange state on channel %d", channel)
         return bool(self._device.sigins[channel].autorange())
 
     # ================= OSC =================
     def _do_set_carrier_freq(self, newfreq, channel):
-        logging.debug(__name__ + ' : setting carrier frequency on channel %s to %s Hz',  channel, newfreq)
+        logger.debug("setting carrier frequency on channel %s to %s Hz", channel, newfreq)
         self._device.oscs[channel].freq(newfreq)
 
     def _do_get_carrier_freq(self, channel):
-        logging.debug(__name__ + ' : getting carrier frequency on channel %s' % channel)
+        logger.debug("getting carrier frequency on channel %s", channel)
         return float(self._device.oscs[channel].freq())
 
     # ================= DEMODS =================
     def _do_set_demod_harmonic(self, newharmonic,channel):
-        logging.debug(__name__ + " : setting harmonic on demodulator %s to %s" ,channel, newharmonic)
+        logger.debug("setting harmonic on demodulator %s to %s", channel, newharmonic)
         self._device.demods[channel].harmonic(newharmonic)
         
     def _do_get_demod_harmonic(self, channel):
-        logging.debug(__name__ + ' : getting harmonic on demodulator %s' % channel)
+        logger.debug("getting harmonic on demodulator %s", channel)
         return int(self._device.demods[channel].harmonic())
     
     def _do_set_filter_order(self, neworder, channel):
-        logging.debug(__name__ + " : setting filter order on demodulator %s to %s" ,channel, neworder)
+        logger.debug("setting filter order on demodulator %s to %s", channel, neworder)
         self._device.demods[channel].order(neworder)
 
     def _do_get_filter_order(self, channel):
-        logging.debug(__name__ + ' : getting filter order on demodulator %s' % channel)
+        logger.debug("getting filter order on demodulator %s", channel)
         return int(self._device.demods[channel].order())
     
     def _do_set_filter_timeconst(self, newtc, channel):
-        logging.debug(__name__ + " : setting filter time constant on demodulator %s to %s s" ,channel, newtc)
+        logger.debug("setting filter time constant on demodulator %s to %s s", channel, newtc)
         self._device.demods[channel].timeconstant(newtc)
 
     def _do_get_filter_timeconst(self, channel):
-        logging.debug(__name__ + ' : getting filter timeconstant on demodulator %s' % channel)
+        logger.debug("getting filter timeconstant on demodulator %s", channel)
         return float(self._device.demods[channel].timeconstant())
     
     def _do_set_demod_enable(self, onoff, channel):
         mode = "activating" if onoff else "deactivating"
-        logging.debug(__name__ + ' : %s demodulator %s' ,mode, channel)
+        logger.debug("%s demodulator %s", mode, channel)
         self._device.demods[channel].enable(int(bool(onoff)))
 
     def _do_get_demod_enable(self, channel):
-        logging.debug(__name__ + ' : getting status of demodulator %s' % channel)
+        logger.debug("getting status of demodulator %s", channel)
         return bool(self._device.demods[channel].enable())
 
     def _do_set_sample_rate(self, newrate, channel):
-        logging.debug(__name__ + " : setting sample rate on demodulator %s to %s s" ,channel, newrate)
+        logger.debug("setting sample rate on demodulator %s to %s Hz", channel, newrate)
         self._device.demods[channel].rate(newrate)
 
     def _do_get_sample_rate(self, channel):
-        logging.debug(__name__ + ' : getting sample rate on demodulator %s' % channel)
+        logger.debug("getting sample rate on demodulator %s", channel)
         return float(self._device.demods[channel].rate())
 
     # ================= OUTPUT =================
     def _do_set_output(self, onoff, channel):
-        mode = "activating" if onoff else "deaktivating"
-        logging.debug(__name__ + ' : %s output channel %s', mode, channel)
+        mode = "activating" if onoff else "deactivating"
+        logger.debug("%s output channel %s", mode, channel)
         self._device.sigouts[channel].on(int(bool(onoff)))
 
     def _do_get_output(self, channel):
-        logging.debug(__name__ + ' : getting status of output channel %s' % channel)
+        logger.debug("getting status of output channel %s", channel)
         return bool(self._device.sigouts[channel].on())
 
     def _do_get_output_50ohm(self, channel):
-        logging.debug("%s: getting expected load impedance of output channel %d",__name__, channel)
+        logger.debug("getting expected load impedance of output channel %d", channel)
         return bool(self._device.sigouts[channel].imp50())
 
     def _do_get_output_range(self, channel):
-        logging.debug("%s: getting output range on channel %d",__name__, channel)
+        logger.debug("getting output range on channel %d", channel)
         return float(self._device.sigouts[channel].range())
 
     def _do_get_output_amplitude(self, channel):
-        logging.debug("%s: getting output amplitude on channel %d",__name__, channel)
+        logger.debug("getting output amplitude on channel %d", channel)
         return float(self._device.sigouts[channel].amplitudes[3 + 4 * channel]())
-    
-    def _do_set_output_amp_enable(self, onoff, channel):
-        mode = "activating" if onoff else "deactivating"
-        logging.debug(__name__ + ' : %s amplitude on output channel %s' ,mode, channel)
-        self._device.sigouts[channel].on(int(bool(onoff)))
-        #self._device.sigouts[channel].on[3 +4 * channel](int(bool(onoff)))
-        
-    def _do_get_output_amp_enable(self, channel):
-        logging.debug(__name__ + ' : getting amplitude status on output channel %s' % channel)
-        #return bool(self._device.sigouts[channel].on[3 + 4 * channel]())
-        return bool(self._device.sigouts[channel].on())
+
 
     # ================= SOFTWARE =================
     def _do_set_step_recovery(self, value):
-        logging.debug(__name__ + ' : setting step recovery to %s' % value)
+        logger.debug("setting step recovery to %s", value)
         allowed_values = ('0.632', '0.9', '0.99', '0.999')
         if str(value) not in allowed_values:
             raise ValueError(
@@ -431,7 +432,7 @@ class ZI_UHFLI_v3(Instrument):
         self._step_recovery = str(value)
 
     def _do_get_step_recovery(self):
-        logging.debug(__name__ + ' : getting step recovery value')
+        logger.debug("getting step recovery value")
         return self._step_recovery
   
 #=======================================================================================================
@@ -439,5 +440,4 @@ if __name__ == "__main__":
     import qkit
     qkit.start()    
     
-    UHFLI_test = qkit.instruments.create("UHFLI_test", "ZI_UHFLI_v2", device_id = "dev2587")
-    
+    UHFLI_test = qkit.instruments.create("UHFLI_test", "ZI_UHFLI_v3", device_id = "dev2587")
