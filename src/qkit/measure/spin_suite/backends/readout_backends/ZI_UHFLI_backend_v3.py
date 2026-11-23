@@ -48,9 +48,27 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
 
         self.set_readout_mode(readout_mode)
 
-        # Register measurements: these nodes define the datasets in the file
-        units = {"x": "V", "y": "V", "r": "V/V", "theta": "rad", "timestamp": "s"}
-        self.register_measurement("demod0", {n: units[n] for n in self._nodes}, self._nodes)
+        # One measurement per node, each with its own unit. r keeps the name "demod0" (existing scripts).
+        self._units = {"r": "V/V", "x": "V", "y": "V", "theta": "rad", "timestamp": "s"}
+        self._meas_of_node = {n: ("demod0" if n == "r" else f"demod0_{n}") for n in self._nodes}
+        for node, meas in self._meas_of_node.items():
+            if meas != "demod0":
+                self._add_measurement_methods(meas)       # must exist before register_measurement
+            self.register_measurement(meas, self._units[node], [node])
+
+    def _add_measurement_methods(self, meas):
+        """Create <meas>_... methods that share the demod0 acquisition (all nodes come from the same DAQ data)."""
+        setattr(self, f"{meas}_get_sample_rate", self.demod0_get_sample_rate)
+        setattr(self, f"{meas}_set_measurement_count", self.demod0_set_measurement_count)
+        setattr(self, f"{meas}_set_sample_count", self.demod0_set_sample_count)
+        setattr(self, f"{meas}_set_averages", self.demod0_set_averages)
+        setattr(self, f"{meas}_activate", lambda m=meas: self._set_active(m, True))
+        setattr(self, f"{meas}_deactivate", lambda m=meas: self._set_active(m, False))
+
+    def _set_active(self, meas, on):
+        self._registered_measurements[meas]["active"] = on
+        any_on = any(m.get("active", False) for m in self._registered_measurements.values())
+        self.UHFLI.set_dem0_demod_enable(any_on)    # demod stays on while any measurement needs it
 
     # ------------------------------------------------------------------
     # Readout mode
@@ -94,12 +112,10 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
         self.UHFLI.set_daq_grid(grid_num)
 
     def demod0_activate(self):
-        self.UHFLI.set_dem0_demod_enable(True)
-        self._registered_measurements["demod0"]["active"] = True
+        self._set_active("demod0", True)
 
     def demod0_deactivate(self):
-        self.UHFLI.set_dem0_demod_enable(False)
-        self._registered_measurements["demod0"]["active"] = False
+        self._set_active("demod0", False)
 
     # ------------------------------------------------------------------
     # Acquisition control
@@ -116,8 +132,8 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
 
     def read(self):
         """
-        Returns only grids completed since the last call:
-        {"demod0": {node: array(n_new, measurement_count, sample_count)}}
+        Returns only grids completed since the last call, one entry per active measurement:
+        {"demod0": {"r": array}, "demod0_x": {"x": array}, ...}, arrays (n_new, measurement_count, sample_count).
         Returns {} if no new complete grid is available yet.
         """
         data = self.UHFLI.read(self._nodes)
@@ -145,7 +161,13 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
             amp = self.UHFLI._do_get_output_amplitude(0)
             data["demod0"]["r"] = data["demod0"]["r"] / amp * np.sqrt(2)
 
-        return data
+        # split into one measurement per node
+        out = {}
+        for node, arr in data["demod0"].items():
+            meas = self._meas_of_node.get(node)
+            if meas and self._registered_measurements[meas].get("active", False):
+                out[meas] = {node: arr}
+        return out
 
     def stop(self):
         # Called before every arm and at the end of a measurement; safe to repeat.
