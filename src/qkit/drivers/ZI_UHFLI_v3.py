@@ -285,7 +285,8 @@ class ZI_UHFLI_v3(Instrument):
         Returns
         -------
         dict[str, float]
-            Dictionary containing only time, x, y, phase, and r.
+            timestamp [s], x, y [V], r (normalised to the output amplitude),
+            phase [rad]: phase of the measured signal, atan2(y, x), as theta in LabOne.
         """
         if output not in (0, 1):
             raise ValueError(f"Invalid output channel {output}")
@@ -297,19 +298,16 @@ class ZI_UHFLI_v3(Instrument):
 
         raw = self._device.demods[channel].sample()
 
-        # Extract only the values we want
-        out = {
-            "timestamp": float(raw["timestamp"][-1]) *
-                    self._device.system.properties.timebase(),
-            "x": float(raw["x"][-1]),
-            "y": float(raw["y"][-1]),
-            "phase": float(raw["phase"][-1]),
+        x = float(raw["x"][-1])
+        y = float(raw["y"][-1])
+        return {
+            "timestamp": float(raw["timestamp"][-1]) * self._device.system.properties.timebase(),
+            "x": x,
+            "y": y,
+            # raw["phase"] is the oscillator (reference) phase, not the signal phase
+            "phase": float(np.arctan2(y, x)),
+            "r": float(np.hypot(x, y) / self._do_get_output_amplitude(output) * np.sqrt(2)),
         }
-
-        # Add magnitude r from x and y
-        out["r"] = float(np.hypot(out["x"], out["y"]) / self._do_get_output_amplitude(output) * np.sqrt(2))
-
-        return out
 
     # ================= INPUT =================
     def _do_set_input_range(self, newrange, channel):
