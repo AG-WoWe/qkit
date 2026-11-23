@@ -49,7 +49,8 @@ class ZI_UHFLI_backend_v3(RO_backend_base):
         self.set_readout_mode(readout_mode)
 
         # Register measurements: these nodes define the datasets in the file
-        self.register_measurement("demod0", "V", self._nodes)
+        units = {"x": "V", "y": "V", "r": "V/V", "theta": "rad", "timestamp": "s"}
+        self.register_measurement("demod0", {n: units[n] for n in self._nodes}, self._nodes)
 
     # ------------------------------------------------------------------
     # Readout mode
