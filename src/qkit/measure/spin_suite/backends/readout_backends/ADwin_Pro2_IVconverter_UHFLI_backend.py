@@ -12,11 +12,17 @@ _set_averages, _activate, _deactivate) are forwarded to the sub-backend that own
 arm(), finished(), read() and stop() are applied to every sub-backend that has at least one active
 measurement; read() merges their data dicts.
 
+timeout (s): if no sub-backend delivers new data for this long while not all of them are finished,
+read() raises a TimeoutError that names the sub-backends still waiting (instead of hanging forever).
+None = wait forever (old behaviour).
+
 Usage:
-    readout_backend_DCRF = Combined_readout_backend(readout_backend_DC, readout_backend_RF)
+    readout_backend_DCRF = Combined_readout_backend(readout_backend_DC, readout_backend_RF, timeout=120)
     excite = Exciting(readout_backend_DCRF, manipulation_backend_DC, (full_pt, parameters),
                       measurement_mapping={"meas_dc": "input1", "meas_rf": "demod0"}, ...)
 """
+import time
+
 from qkit.measure.spin_suite.backends.readout_backends.RO_backend_base import RO_backend_base
 
 _FORWARDED = ("get_sample_rate", "set_sample_rate", "set_measurement_count", "set_sample_count",
@@ -24,14 +30,16 @@ _FORWARDED = ("get_sample_rate", "set_sample_rate", "set_measurement_count", "se
 
 
 class Combined_readout_backend(RO_backend_base):
-    def __init__(self, *backends):
+    def __init__(self, *backends, timeout=None):
         super().__init__()
         if not backends:
             raise ValueError("give at least one readout backend")
         self.backends = list(backends)
+        self.timeout = timeout
         self._owner = {}                 # measurement name -> sub-backend
         self._active = set()             # active measurement names
         self._done = set()               # sub-backends that have delivered everything in this run
+        self._last_data = time.time()    # time of the last read that returned new data
 
         for backend in self.backends:
             for name, info in backend._registered_measurements.items():
@@ -66,6 +74,7 @@ class Combined_readout_backend(RO_backend_base):
         self._done = set()
         for backend in self._used_backends():
             backend.arm()
+        self._last_data = time.time()
 
     def finished(self):
         return all(backend.finished() for backend in self._used_backends())
@@ -80,6 +89,14 @@ class Combined_readout_backend(RO_backend_base):
                 data.update(part)
             elif backend.finished():
                 self._done.add(id(backend))
+
+        if data:
+            self._last_data = time.time()
+        elif self.timeout is not None and time.time() - self._last_data > self.timeout:
+            waiting = [str(b) for b in self._used_backends()
+                       if id(b) not in self._done and not b.finished()]
+            raise TimeoutError(f"no new data for {self.timeout:g} s, still waiting for: "
+                               + (", ".join(waiting) or "?"))
         return data
 
     def stop(self):
